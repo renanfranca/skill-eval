@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+*.log
+
+# Evaluation inputs and run evidence are local and may contain sensitive data.
+evaluations/
+runs/
+.skill-eval/
+
+# Editor and operating-system files.
+.DS_Store
+.idea/
+.vscode/
