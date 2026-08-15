@@ -19,7 +19,7 @@ import type { CaseRecord, TerminalReceipt, TerminalStatus } from './types.js';
 export interface RunOptions {
   specPath: string;
   outDirectory: string;
-  approveProviderCalls: number;
+  approveProviderCalls: string;
   provider: EvaluationProvider;
   codexHomeSource?: string;
   now?: () => Date;
@@ -28,6 +28,17 @@ export interface RunOptions {
 export interface RunResult {
   exitCode: 0 | 3;
   terminal: TerminalReceipt;
+}
+
+interface ProviderAccountingRecord {
+  callNumber: number;
+  role: 'candidate' | 'judge';
+  model: 'gpt-5.6-luna' | 'gpt-5.6-terra';
+  caseId?: string;
+  status: ProviderResult['status'];
+  elapsedMs: number;
+  usage?: TokenUsage;
+  message?: string;
 }
 
 const LIMITATIONS = [
@@ -101,6 +112,25 @@ function promptfooHeuristic(result: ProviderResult): boolean {
   return result.status === 'completion' && result.promptfooProjection?.['skillUsedHeuristic'] === true;
 }
 
+function providerAccountingRecord(
+  callNumber: number,
+  role: ProviderAccountingRecord['role'],
+  model: ProviderAccountingRecord['model'],
+  result: ProviderResult,
+  caseId?: string,
+): ProviderAccountingRecord {
+  return {
+    callNumber,
+    role,
+    model,
+    ...(caseId === undefined ? {} : { caseId }),
+    status: result.status,
+    elapsedMs: result.elapsedMs,
+    ...(result.status === 'completion' && result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(result.status === 'completion' ? {} : { message: redactSecrets(result.message).slice(0, 2000) }),
+  };
+}
+
 async function reserveRun(
   out: string,
   spec: EvaluationSpec,
@@ -152,7 +182,7 @@ function terminalStatusForResult(result: ProviderResult): TerminalStatus {
 export async function runEvaluation(options: RunOptions): Promise<RunResult> {
   const absoluteSpec = path.resolve(options.specPath);
   const spec = await checkEvaluationPackage(absoluteSpec);
-  if (options.approveProviderCalls !== 4) throw usageError('run requires literal --approve-provider-calls 4 for this execution');
+  if (options.approveProviderCalls !== '4') throw usageError('run requires literal --approve-provider-calls 4 for this execution');
   const packageRoot = path.dirname(absoluteSpec);
   const out = path.resolve(options.outDirectory);
   let temporaryHome: TemporaryCodexHome | undefined;
@@ -167,7 +197,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
     const now = options.now ?? (() => new Date());
     const reservedAt = now();
     const cases: CaseRecord[] = [];
-    const providerRecords: Array<{ model: 'gpt-5.6-luna' | 'gpt-5.6-terra'; usage?: TokenUsage; status: ProviderResult['status']; elapsedMs: number }> = [];
+    const providerRecords: ProviderAccountingRecord[] = [];
     let callsAttempted = 0;
     let terminalStatus: TerminalStatus = 'INTERRUPTED_UNCONFIRMED';
     let stoppingRule = 'Run ended before a terminal receipt could be confirmed';
@@ -208,7 +238,9 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
           timeoutMs: 600_000, workspace: trial.path,
           ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
         }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
-        providerRecords.push({ model: 'gpt-5.6-luna', status: result.status, elapsedMs: result.elapsedMs, ...(result.status === 'completion' && result.usage !== undefined ? { usage: result.usage } : {}) });
+        const providerRecord = providerAccountingRecord(callsAttempted, 'candidate', 'gpt-5.6-luna', result, item.id);
+        await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: now().toISOString() });
+        providerRecords.push(providerRecord);
         if (result.status !== 'completion') {
           const record: CaseRecord = {
             caseId: item.id, kind: item.kind, callNumber: callsAttempted,
@@ -274,6 +306,13 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
         };
         cases.push(record);
         await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CASE_RESULT', ...record });
+        const invalidCheck = checks.find((check) => check.status === 'INSTRUMENT_INVALID');
+        if (invalidCheck !== undefined) {
+          terminalStatus = 'INSTRUMENT_INVALID';
+          stoppingRule = `Direct check ${invalidCheck.checkId} could not be applied`;
+          instrumentInvalid = true;
+          break;
+        }
         const doNotProceed = checks.some((check) => !check.passed && check.failureDecision === 'DO_NOT_PROCEED');
         const revise = checks.some((check) => !check.passed && check.required && check.failureDecision === 'REVISE');
         if (doNotProceed || revise) {
@@ -312,7 +351,9 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
             timeoutMs: 600_000, workspace: judgeWorkspace, outputSchema: getJudgeResultSchema(),
             ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
           }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
-          providerRecords.push({ model: 'gpt-5.6-terra', status: judgeResult.status, elapsedMs: judgeResult.elapsedMs, ...(judgeResult.status === 'completion' && judgeResult.usage !== undefined ? { usage: judgeResult.usage } : {}) });
+          const providerRecord = providerAccountingRecord(callsAttempted, 'judge', 'gpt-5.6-terra', judgeResult);
+          await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: now().toISOString() });
+          providerRecords.push(providerRecord);
           if (judgeResult.status !== 'completion') {
             terminalStatus = terminalStatusForResult(judgeResult);
             stoppingRule = `Judge ${judgeResult.status} is terminal and receives zero retries`;

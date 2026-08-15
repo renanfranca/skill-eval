@@ -1,3 +1,6 @@
+import { access, mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { main } from '../src/cli.js';
 
@@ -22,5 +25,20 @@ describe('public CLI surface', () => {
 
   it('rejects unknown commands as a usage error', async () => {
     await expect(main(['unknown'])).rejects.toMatchObject({ exitCode: 2 });
+  });
+
+  it.each([
+    ['missing', []],
+    ['leading zero', ['--approve-provider-calls', '04']],
+    ['decimal', ['--approve-provider-calls', '4.0']],
+    ['exponent', ['--approve-provider-calls', '4e0']],
+    ['explicit plus', ['--approve-provider-calls', '+4']],
+  ])('rejects %s authorization text before inspecting or reserving the run', async (_label, approvalArgs) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-cli-approval-'));
+    const out = path.join(root, 'must-not-exist');
+    await expect(main([
+      'run', '--spec', path.join(root, 'also-must-not-be-read.json'), '--out', out, ...approvalArgs,
+    ])).rejects.toMatchObject({ exitCode: 2 });
+    await expect(access(out)).rejects.toThrow();
   });
 });

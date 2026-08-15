@@ -2,7 +2,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import Ajv from 'ajv/dist/ajv.js';
 import { messageOf } from '../errors.js';
-import { sha256Bytes } from '../spec/canonical.js';
+import { redactSecrets, sha256Bytes } from '../spec/canonical.js';
 import type { DirectCheck } from '../spec/types.js';
 import type { ScannedTree } from '../intake/tree.js';
 
@@ -21,6 +21,7 @@ export interface CheckResult {
   operator: DirectCheck['operator'];
   required: boolean;
   failureDecision: DirectCheck['failureDecision'];
+  status: 'APPLIED' | 'INSTRUMENT_INVALID';
   passed: boolean;
   observation: string;
 }
@@ -72,8 +73,9 @@ async function regularFile(filePath: string): Promise<boolean> {
   try {
     const details = await lstat(filePath);
     return details.isFile() && !details.isSymbolicLink();
-  } catch {
-    return false;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
   }
 }
 
@@ -82,7 +84,8 @@ async function absentPath(filePath: string): Promise<boolean> {
     await lstat(filePath);
     return false;
   } catch (error) {
-    return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return true;
+    throw error;
   }
 }
 
@@ -104,6 +107,7 @@ export async function applyDirectCheck(
     changes: FilesystemChange[];
   },
 ): Promise<CheckResult> {
+  let status: CheckResult['status'] = 'APPLIED';
   let passed = false;
   let observation = '';
   try {
@@ -145,7 +149,7 @@ export async function applyDirectCheck(
       }
       case 'PATH_ABSENT': {
         passed = await absentPath(workspacePath(context.workspace, check.path));
-        observation = passed ? 'Prespecified path is absent' : 'Prespecified path exists or could not be inspected safely';
+        observation = passed ? 'Prespecified path is absent' : 'Prespecified path exists';
         break;
       }
       case 'FILE_EQUALS': {
@@ -191,8 +195,9 @@ export async function applyDirectCheck(
       }
     }
   } catch (error) {
+    status = 'INSTRUMENT_INVALID';
     passed = false;
-    observation = `Check could not be applied: ${messageOf(error)}`;
+    observation = `Check could not be applied: ${redactSecrets(messageOf(error)).slice(0, 2000)}`;
   }
   return {
     checkId: check.id,
@@ -200,6 +205,7 @@ export async function applyDirectCheck(
     operator: check.operator,
     required: check.required,
     failureDecision: check.failureDecision,
+    status,
     passed,
     observation,
   };

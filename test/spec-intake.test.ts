@@ -1,5 +1,7 @@
-import { chmod, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { chmod, link, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { scanTree } from '../src/intake/tree.js';
 import { canonicalJson } from '../src/spec/canonical.js';
@@ -7,6 +9,7 @@ import { checkEvaluationPackage, validateAnswers } from '../src/spec/validate.js
 import { directAnswers, makePackage } from './helpers.js';
 
 describe('specification and confined intake', () => {
+  const execFileAsync = promisify(execFile);
   it('creates a canonical package, preserves bytes and executable mode, and checks its digest offline', async () => {
     const fixture = await makePackage();
     const script = path.join(fixture.skill, 'tool.sh');
@@ -67,7 +70,7 @@ describe('specification and confined intake', () => {
     expect(() => validateAnswers(remote)).toThrow(/non-local/i);
   });
 
-  it('rejects symlinks, forbidden contexts, hardlinks, and escaping Markdown references', async () => {
+  it('rejects symlinks, forbidden contexts, and escaping Markdown references', async () => {
     const fixture = await makePackage();
     await symlink(path.join(fixture.skill, 'SKILL.md'), path.join(fixture.skill, 'link.md'));
     await expect(scanTree(fixture.skill, { requireSkillMd: true })).rejects.toThrow(/Symlink|safely open/i);
@@ -80,6 +83,27 @@ describe('specification and confined intake', () => {
     await (await import('node:fs/promises')).rmdir(path.join(fixture.skill, '.agents'));
     await writeFile(path.join(fixture.skill, 'SKILL.md'), '[escape][outside]\n\n[outside]: ..\\outside.txt\n');
     await expect(scanTree(fixture.skill, { requireSkillMd: true })).rejects.toThrow(/escapes snapshot/i);
+  });
+
+  it.runIf(process.platform !== 'win32')('rejects a hardlinked file', async () => {
+    const fixture = await makePackage();
+    const original = path.join(fixture.skill, 'original.txt');
+    await writeFile(original, 'shared inode');
+    await link(original, path.join(fixture.skill, 'alias.txt'));
+    await expect(scanTree(fixture.skill, { requireSkillMd: true })).rejects.toThrow(/Hardlinked/i);
+  });
+
+  it.runIf(process.platform !== 'win32')('rejects a special filesystem entry when the platform supports FIFOs', async () => {
+    const fixture = await makePackage();
+    await execFileAsync('mkfifo', [path.join(fixture.skill, 'special.fifo')]);
+    await expect(scanTree(fixture.skill, { requireSkillMd: true })).rejects.toThrow(/Special filesystem entry/i);
+  });
+
+  it.runIf(process.platform === 'linux')('rejects case-insensitive path collisions', async () => {
+    const fixture = await makePackage();
+    await writeFile(path.join(fixture.skill, 'Result.txt'), 'first');
+    await writeFile(path.join(fixture.skill, 'result.txt'), 'second', { flag: 'wx' });
+    await expect(scanTree(fixture.skill, { requireSkillMd: true })).rejects.toThrow(/Case-insensitive path collision/i);
   });
 
   it('detects post-init skill tampering', async () => {

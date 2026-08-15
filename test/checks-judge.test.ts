@@ -36,6 +36,12 @@ describe('direct evidence and opaque judge qualification', () => {
     const valid = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<{ criteria: Array<{ evidenceRefs: string[]; verdict: string }> }> };
     valid.items.pop();
     expect(validateJudgeOutput(JSON.stringify(valid), prepared).valid).toBe(false);
+    const duplicate = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<{ opaqueId: string }> };
+    duplicate.items[1] = structuredClone(duplicate.items[0]!);
+    expect(validateJudgeOutput(JSON.stringify(duplicate), prepared)).toMatchObject({ valid: false, reason: expect.stringMatching(/duplicated/i) });
+    const extra = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<Record<string, unknown>> };
+    extra.items.push(structuredClone(extra.items[0]!));
+    expect(validateJudgeOutput(JSON.stringify(extra), prepared)).toMatchObject({ valid: false, reason: expect.stringMatching(/extra/i) });
     const badRef = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<{ criteria: Array<{ evidenceRefs: string[] }> }> };
     const criterion = badRef.items.find((candidate) => candidate.criteria.length > 0)?.criteria[0];
     if (criterion === undefined) throw new Error('Expected criterion');

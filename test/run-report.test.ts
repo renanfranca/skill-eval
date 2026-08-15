@@ -20,7 +20,7 @@ describe('provider-bounded run and deterministic report', () => {
     const fixture = await makePackage();
     const provider = new FakeProvider(completions());
     const run = path.join(fixture.root, 'run');
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider });
     expect(result.exitCode).toBe(0);
     expect(result.terminal).toMatchObject({ status: 'COMPLETED', recommendation: 'PROCEED', calls: { attempted: 3, retries: 0 }, cost: { actualChatGptCost: 'UNKNOWN' } });
     expect(provider.requests.map((request) => request.role)).toEqual(['candidate', 'candidate', 'candidate']);
@@ -35,14 +35,23 @@ describe('provider-bounded run and deterministic report', () => {
     expect(await reportRun({ runDirectory: run, format: 'json' })).toContain('"recommendation": "PROCEED"');
   });
 
+  it.each(['04', '4.0', '4e0', '+4'])('rejects numerically equivalent authorization %s before reservation or any provider call', async (approval) => {
+    const fixture = await makePackage();
+    const provider = new FakeProvider(completions());
+    const run = path.join(fixture.root, `run-invalid-approval-${approval.replaceAll('.', '-')}`);
+    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: approval, provider })).rejects.toMatchObject({ exitCode: 2 });
+    expect(provider.requests).toHaveLength(0);
+    await expect(access(run)).rejects.toThrow();
+  });
+
   it('requires literal authorization and a new directory before any provider call', async () => {
     const fixture = await makePackage();
     const provider = new FakeProvider(completions());
     const run = path.join(fixture.root, 'run');
-    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 3, provider })).rejects.toMatchObject({ exitCode: 2 });
+    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '3', provider })).rejects.toMatchObject({ exitCode: 2 });
     expect(provider.requests).toHaveLength(0);
     await mkdir(run);
-    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider })).rejects.toMatchObject({ exitCode: 4 });
+    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider })).rejects.toMatchObject({ exitCode: 4 });
     expect(provider.requests).toHaveLength(0);
   });
 
@@ -58,7 +67,7 @@ describe('provider-bounded run and deterministic report', () => {
       },
     };
     const out = path.join(fixture.root, 'run-no-auth');
-    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: out, approveProviderCalls: 4, provider })).rejects.toMatchObject({ exitCode: 2 });
+    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: out, approveProviderCalls: '4', provider })).rejects.toMatchObject({ exitCode: 2 });
     expect(called).toBe(false);
     await expect(access(out)).rejects.toThrow();
   });
@@ -69,7 +78,7 @@ describe('provider-bounded run and deterministic report', () => {
   ])('debits one %s attempt and performs zero retries', async (_label, first, expectedStatus) => {
     const fixture = await makePackage();
     const provider = new FakeProvider([first, ...completions()]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, `run-${_label}`), approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, `run-${_label}`), approveProviderCalls: '4', provider });
     expect(result.exitCode).toBe(3);
     expect(result.terminal.status).toBe(expectedStatus);
     expect(result.terminal.calls).toMatchObject({ attempted: 1, retries: 0 });
@@ -79,11 +88,31 @@ describe('provider-bounded run and deterministic report', () => {
   it('preserves a direct critical failure, stops remaining calls, and never lets a judge override it', async () => {
     const fixture = await makePackage();
     const provider = new FakeProvider([{ type: 'completion', output: 'positive-ok' }, { type: 'completion', output: 'unsafe' }, ...completions()]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-critical'), approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-critical'), approveProviderCalls: '4', provider });
     expect(result.exitCode).toBe(0);
     expect(result.terminal).toMatchObject({ status: 'CRITICAL_VIOLATION', recommendation: 'DO_NOT_PROCEED', calls: { attempted: 2 } });
     expect(provider.requests).toHaveLength(2);
     expect(result.terminal.judgeQualification.attempted).toBe(false);
+  });
+
+  it('preserves an observed required failure as REVISE with exit code zero', async () => {
+    const fixture = await makePackage();
+    const provider = new FakeProvider([{ type: 'completion', output: 'wrong-positive' }, ...completions()]);
+    const result = await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: path.join(fixture.root, 'run-revise'),
+      approveProviderCalls: '4',
+      provider,
+    });
+    expect(result).toMatchObject({
+      exitCode: 0,
+      terminal: { status: 'CRITICAL_VIOLATION', recommendation: 'REVISE', calls: { attempted: 1, retries: 0 } },
+    });
+    expect(result.terminal.directObservations).toEqual([
+      expect.objectContaining({ checkId: 'positive-equals', status: 'APPLIED', passed: false }),
+    ]);
+    expect(result.terminal.judgeQualification.attempted).toBe(false);
+    expect(provider.requests).toHaveLength(1);
   });
 
   it('spends exactly one Terra call for required semantics and qualifies all four opaque probes', async () => {
@@ -91,7 +120,7 @@ describe('provider-bounded run and deterministic report', () => {
     answers.cases[0].semanticCriteria = [{ id: 'semantic-meaning', claimId: 'behavior', statement: 'The output conveys the requested meaning.', required: true }];
     const fixture = await makePackage(answers);
     const provider = new FakeProvider([...completions(), { type: 'completion', output: (request) => qualifiedJudgeOutput(request.prompt), usage: { input: 100, cachedInput: 0, output: 40 } }]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-semantic'), approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-semantic'), approveProviderCalls: '4', provider });
     expect(result.terminal).toMatchObject({ status: 'COMPLETED', recommendation: 'PROCEED', calls: { attempted: 4 }, judgeQualification: { attempted: true, valid: true } });
     expect(provider.requests.map((request) => `${request.model}/${request.reasoningEffort}`)).toEqual([
       'gpt-5.6-luna/max', 'gpt-5.6-luna/max', 'gpt-5.6-luna/max', 'gpt-5.6-terra/xhigh',
@@ -106,7 +135,7 @@ describe('provider-bounded run and deterministic report', () => {
     answers.cases[0].semanticCriteria = [{ id: 'semantic-meaning', claimId: 'behavior', statement: 'The output conveys the requested meaning.', required: true }];
     const fixture = await makePackage(answers);
     const provider = new FakeProvider([...completions(), { type: 'completion', output: '{"schemaVersion":1,"items":[]}' }, { type: 'completion', output: 'fallback forbidden' }]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-invalid-judge'), approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-invalid-judge'), approveProviderCalls: '4', provider });
     expect(result.exitCode).toBe(3);
     expect(result.terminal).toMatchObject({ status: 'JUDGE_INVALID', recommendation: 'NO_DECISION', calls: { attempted: 4, retries: 0 }, judgeQualification: { valid: false } });
     expect(result.terminal.directObservations).toHaveLength(3);
@@ -122,7 +151,7 @@ describe('provider-bounded run and deterministic report', () => {
     }
     const fixture = await makePackage(answers);
     const provider = new FakeProvider([{ type: 'completion', output: 'one' }, { type: 'completion', output: 'two' }, { type: 'completion', output: 'three' }]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-activation'), approveProviderCalls: 4, provider });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-activation'), approveProviderCalls: '4', provider });
     expect(result.terminal.recommendation).toBe('NO_DECISION');
     expect(result.terminal.claims[0]).toMatchObject({ status: 'NOT_ASSESSED' });
   });
@@ -154,7 +183,7 @@ describe('provider-bounded run and deterministic report', () => {
         return { status: 'completion', finalOutput: ['positive-ok', 'invalid-ok', 'boundary-ok'][this.index++]!, elapsedMs: 1 };
       }
     }
-    await runEvaluation({ specPath: path.join(evaluationWithFixture, 'evaluation-spec.json'), outDirectory: path.join(fixture.root, 'run-isolation'), approveProviderCalls: 4, provider: new InspectingProvider() });
+    await runEvaluation({ specPath: path.join(evaluationWithFixture, 'evaluation-spec.json'), outDirectory: path.join(fixture.root, 'run-isolation'), approveProviderCalls: '4', provider: new InspectingProvider() });
     expect(observed).toEqual([['.agents', 'input.txt'], ['.agents'], ['.agents']]);
   });
 
@@ -176,7 +205,7 @@ describe('provider-bounded run and deterministic report', () => {
         return { status: 'completion', finalOutput: ['positive-ok', 'invalid-ok', 'boundary-ok'][this.index++]!, elapsedMs: 1 };
       }
     }
-    await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-auth'), approveProviderCalls: 4, provider: new AuthInspectingProvider(), codexHomeSource: sourceHome });
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-auth'), approveProviderCalls: '4', provider: new AuthInspectingProvider(), codexHomeSource: sourceHome });
     expect(new Set(temporaryHomes).size).toBe(1);
     await expect(access(temporaryHomes[0]!)).rejects.toThrow();
   });
@@ -195,7 +224,7 @@ describe('provider-bounded run and deterministic report', () => {
         return Promise.resolve({ status: 'error' as const, elapsedMs: 1, message: 'captured deterministic error' });
       },
     };
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-auth-error'), approveProviderCalls: 4, provider, codexHomeSource: sourceHome });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-auth-error'), approveProviderCalls: '4', provider, codexHomeSource: sourceHome });
     expect(result).toMatchObject({ exitCode: 3, terminal: { status: 'PROVIDER_ERROR' } });
     expect(temporaryHome).toBeDefined();
     await expect(access(temporaryHome!)).rejects.toThrow();
@@ -206,7 +235,7 @@ describe('provider-bounded run and deterministic report', () => {
     const secret = 'sk-abcdefghijklmnop1234567890';
     const run = path.join(fixture.root, 'run-secret');
     const result = await runEvaluation({
-      specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4,
+      specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4',
       provider: new FakeProvider([{ type: 'completion', output: `leaked ${secret}` }]),
     });
     expect(result).toMatchObject({ exitCode: 3, terminal: { status: 'ENVIRONMENT_FAILURE', recommendation: 'NO_DECISION' } });
@@ -229,26 +258,90 @@ describe('provider-bounded run and deterministic report', () => {
         return { status: 'completion', finalOutput: 'positive-ok', elapsedMs: 1 };
       }
     }
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-symlink'), approveProviderCalls: 4, provider: new SymlinkProvider() });
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-symlink'), approveProviderCalls: '4', provider: new SymlinkProvider() });
     expect(result).toMatchObject({ exitCode: 3, terminal: { status: 'ENVIRONMENT_FAILURE', calls: { attempted: 1, retries: 0 } } });
+  });
+
+  it('classifies a check application error as INSTRUMENT_INVALID without judge or retry and preserves the sanitized observation', async () => {
+    const answers = directAnswers();
+    answers.cases[0].checks = [{
+      id: 'utf8-check', claimId: 'behavior', operator: 'FILE_CONTAINS', path: 'invalid-utf8.txt',
+      fragments: ['expected'], required: true, failureDecision: 'REVISE',
+    }];
+    const fixture = await makePackage(answers);
+    class InvalidUtf8Provider implements EvaluationProvider {
+      readonly kind = 'fake' as const;
+      readonly requiresAuthentication = false;
+      calls = 0;
+      async execute(request: ProviderRequest): Promise<ProviderResult> {
+        this.calls += 1;
+        if (request.workspace === undefined) throw new Error('workspace missing');
+        await writeFile(path.join(request.workspace, 'invalid-utf8.txt'), Uint8Array.from([0xc3, 0x28]));
+        return { status: 'completion', finalOutput: 'positive-ok', elapsedMs: 7, usage: { input: 2, cachedInput: 0, output: 1 } };
+      }
+    }
+    const provider = new InvalidUtf8Provider();
+    const result = await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: path.join(fixture.root, 'run-instrument-invalid'),
+      approveProviderCalls: '4',
+      provider,
+    });
+    expect(result).toMatchObject({
+      exitCode: 3,
+      terminal: {
+        status: 'INSTRUMENT_INVALID', recommendation: 'NO_DECISION',
+        calls: { attempted: 1, completed: 1, retries: 0 },
+        judgeQualification: { attempted: false },
+      },
+    });
+    expect(result.terminal.directObservations).toEqual([
+      expect.objectContaining({
+        checkId: 'utf8-check', status: 'INSTRUMENT_INVALID', passed: false,
+        observation: expect.stringMatching(/^Check could not be applied:/),
+      }),
+    ]);
+    expect(result.terminal.claims).toEqual([expect.objectContaining({ status: 'NOT_ASSESSED' })]);
+    expect(provider.calls).toBe(1);
   });
 
   it('reports an interrupted directory as NO_DECISION and never resumes it', async () => {
     const fixture = await makePackage();
     const run = path.join(fixture.root, 'run-interrupted');
-    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider: new FakeProvider(completions()) });
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: new FakeProvider(completions()) });
     await rm(path.join(run, 'terminal.json'));
     const report = await buildReport(run);
-    expect(report).toMatchObject({ decision: { recommendation: 'NO_DECISION' }, terminal: { status: 'INTERRUPTED_UNCONFIRMED' } });
+    expect(report).toMatchObject({
+      decision: { recommendation: 'NO_DECISION' },
+      terminal: { status: 'INTERRUPTED_UNCONFIRMED' },
+      calls: {
+        attempted: 3,
+        completed: 3,
+        timeout: 0,
+        error: 0,
+        wallTimeMs: 3,
+        usage: { input: 30, cachedInput: 6, output: 9 },
+      },
+      cost: { apiEquivalentEstimateUsd: 0.00001572 },
+    });
+    expect(report.cases).toHaveLength(3);
+    expect(report.directObservations).toHaveLength(3);
+    expect(report.claims).toEqual([expect.objectContaining({ claimId: 'behavior', status: 'SUPPORTED' })]);
+    const events = (await readFile(path.join(run, 'case-results.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { event: string });
+    expect(events.map((event) => event.event)).toEqual([
+      'CALL_ATTEMPTED', 'CALL_RESULT', 'CASE_RESULT',
+      'CALL_ATTEMPTED', 'CALL_RESULT', 'CASE_RESULT',
+      'CALL_ATTEMPTED', 'CALL_RESULT', 'CASE_RESULT',
+    ]);
     const nextProvider = new FakeProvider(completions());
-    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider: nextProvider })).rejects.toMatchObject({ exitCode: 4 });
+    await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: nextProvider })).rejects.toMatchObject({ exitCode: 4 });
     expect(nextProvider.requests).toHaveLength(0);
   });
 
   it('refuses to overwrite an existing report file', async () => {
     const fixture = await makePackage();
     const run = path.join(fixture.root, 'run-report');
-    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider: new FakeProvider(completions()) });
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: new FakeProvider(completions()) });
     const out = path.join(fixture.root, 'report.json');
     await writeFile(out, 'existing');
     await expect(reportRun({ runDirectory: run, format: 'json', outFile: out })).rejects.toMatchObject({ exitCode: 4 });
@@ -258,7 +351,7 @@ describe('provider-bounded run and deterministic report', () => {
   it('rejects canonical-looking terminal tampering as run corruption', async () => {
     const fixture = await makePackage();
     const run = path.join(fixture.root, 'run-tampered');
-    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: 4, provider: new FakeProvider(completions()) });
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: new FakeProvider(completions()) });
     const terminalPath = path.join(run, 'terminal.json');
     const terminal = JSON.parse(await readFile(terminalPath, 'utf8')) as { calls: { attempted: number } };
     terminal.calls.attempted = 4;

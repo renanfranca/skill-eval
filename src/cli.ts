@@ -62,7 +62,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     case 'run': {
       const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { spec: { type: 'string' }, out: { type: 'string' }, 'approve-provider-calls': { type: 'string' } } });
-      const approval = Number(required(values['approve-provider-calls'], 'approve-provider-calls'));
+      const approval = required(values['approve-provider-calls'], 'approve-provider-calls');
+      if (approval !== '4') throw usageError('run requires literal --approve-provider-calls 4 for this execution');
       const result = await runEvaluation({
         specPath: required(values.spec, 'spec'), outDirectory: required(values.out, 'out'), approveProviderCalls: approval,
         provider: new PromptfooCodexProvider(),

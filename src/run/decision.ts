@@ -26,6 +26,10 @@ export function assessClaims(
       }
       const results = record.checks.filter((check) => check.claimId === claim.id);
       for (const result of results) {
+        if (result.status === 'INSTRUMENT_INVALID') {
+          insufficient = true;
+          continue;
+        }
         hasEvidence = true;
         evidenceRefs.push(`case:${item.id}:check:${result.checkId}`);
         if (!result.passed) contradicted = true;
