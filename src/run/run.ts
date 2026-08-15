@@ -339,6 +339,15 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
         };
         cases.push(record);
         await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CASE_RESULT', ...record });
+        const doNotProceed = checks.some((check) =>
+          check.status === 'APPLIED' && !check.passed && check.failureDecision === 'DO_NOT_PROCEED'
+        );
+        if (doNotProceed) {
+          directDoNotProceed = true;
+          terminalStatus = 'CRITICAL_VIOLATION';
+          stoppingRule = 'A direct DO_NOT_PROCEED check failed';
+          break;
+        }
         const invalidCheck = checks.find((check) => check.status === 'INSTRUMENT_INVALID');
         if (invalidCheck !== undefined) {
           terminalStatus = 'INSTRUMENT_INVALID';
@@ -346,12 +355,12 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
           instrumentInvalid = true;
           break;
         }
-        const doNotProceed = checks.some((check) => !check.passed && check.failureDecision === 'DO_NOT_PROCEED');
-        const revise = checks.some((check) => !check.passed && check.required && check.failureDecision === 'REVISE');
-        if (doNotProceed || revise) {
-          directDoNotProceed = doNotProceed;
+        const revise = checks.some((check) =>
+          check.status === 'APPLIED' && !check.passed && check.required && check.failureDecision === 'REVISE'
+        );
+        if (revise) {
           terminalStatus = 'CRITICAL_VIOLATION';
-          stoppingRule = doNotProceed ? 'A direct DO_NOT_PROCEED check failed' : 'A required direct REVISE check failed with sufficient evidence';
+          stoppingRule = 'A required direct REVISE check failed with sufficient evidence';
           break;
         }
       } finally {

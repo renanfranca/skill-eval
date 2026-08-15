@@ -15,6 +15,21 @@ const completions = () => [
   { type: 'completion' as const, output: 'boundary-ok', usage: { input: 10, cachedInput: 2, output: 3 } },
 ];
 
+class InvalidUtf8Provider implements EvaluationProvider {
+  readonly kind = 'fake' as const;
+  readonly requiresAuthentication = false;
+  calls = 0;
+
+  constructor(private readonly finalOutput: string) {}
+
+  async execute(request: ProviderRequest): Promise<ProviderResult> {
+    this.calls += 1;
+    if (request.workspace === undefined) throw new Error('workspace missing');
+    await writeFile(path.join(request.workspace, 'invalid-utf8.txt'), Uint8Array.from([0xc3, 0x28]));
+    return { status: 'completion', finalOutput: this.finalOutput, elapsedMs: 7, usage: { input: 2, cachedInput: 0, output: 1 } };
+  }
+}
+
 describe('provider-bounded run and deterministic report', () => {
   it('completes direct evidence with three calls, does not call Terra, and reports separated evidence and unknown actual cost', async () => {
     const fixture = await makePackage();
@@ -93,6 +108,56 @@ describe('provider-bounded run and deterministic report', () => {
     expect(result.terminal).toMatchObject({ status: 'CRITICAL_VIOLATION', recommendation: 'DO_NOT_PROCEED', calls: { attempted: 2 } });
     expect(provider.requests).toHaveLength(2);
     expect(result.terminal.judgeQualification.attempted).toBe(false);
+  });
+
+  it('gives an observed direct DO_NOT_PROCEED violation precedence over another invalid check in the same case', async () => {
+    const answers = directAnswers();
+    answers.cases[0].checks = [
+      {
+        id: 'critical-direct', claimId: 'behavior', operator: 'FINAL_EQUALS', expected: 'positive-ok',
+        required: true, failureDecision: 'DO_NOT_PROCEED',
+      },
+      {
+        id: 'invalid-instrument', claimId: 'behavior', operator: 'FILE_CONTAINS', path: 'invalid-utf8.txt',
+        fragments: ['expected'], required: true, failureDecision: 'REVISE',
+      },
+    ];
+    const fixture = await makePackage(answers);
+    const provider = new InvalidUtf8Provider('unsafe');
+    const run = path.join(fixture.root, 'run-critical-precedence');
+    const result = await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      terminal: {
+        status: 'CRITICAL_VIOLATION', recommendation: 'DO_NOT_PROCEED',
+        calls: { attempted: 1, completed: 1, retries: 0 },
+        judgeQualification: { attempted: false },
+      },
+    });
+    expect(result.terminal.directObservations).toEqual([
+      expect.objectContaining({
+        checkId: 'critical-direct', status: 'APPLIED', passed: false, failureDecision: 'DO_NOT_PROCEED',
+      }),
+      expect.objectContaining({
+        checkId: 'invalid-instrument', status: 'INSTRUMENT_INVALID', passed: false,
+      }),
+    ]);
+    expect(result.terminal.claims).toEqual([expect.objectContaining({ status: 'NOT_SUPPORTED' })]);
+    expect(provider.calls).toBe(1);
+    await expect(buildReport(run)).resolves.toMatchObject({
+      decision: { recommendation: 'DO_NOT_PROCEED' },
+      terminal: { status: 'CRITICAL_VIOLATION' },
+      directObservations: [
+        expect.objectContaining({ checkId: 'critical-direct', status: 'APPLIED', passed: false }),
+        expect.objectContaining({ checkId: 'invalid-instrument', status: 'INSTRUMENT_INVALID', passed: false }),
+      ],
+    });
   });
 
   it('preserves an observed required failure as REVISE with exit code zero', async () => {
@@ -262,25 +327,14 @@ describe('provider-bounded run and deterministic report', () => {
     expect(result).toMatchObject({ exitCode: 3, terminal: { status: 'ENVIRONMENT_FAILURE', calls: { attempted: 1, retries: 0 } } });
   });
 
-  it('classifies a check application error as INSTRUMENT_INVALID without judge or retry and preserves the sanitized observation', async () => {
+  it('keeps an unavailable DO_NOT_PROCEED check INSTRUMENT_INVALID without treating it as an observed violation', async () => {
     const answers = directAnswers();
     answers.cases[0].checks = [{
       id: 'utf8-check', claimId: 'behavior', operator: 'FILE_CONTAINS', path: 'invalid-utf8.txt',
-      fragments: ['expected'], required: true, failureDecision: 'REVISE',
+      fragments: ['expected'], required: true, failureDecision: 'DO_NOT_PROCEED',
     }];
     const fixture = await makePackage(answers);
-    class InvalidUtf8Provider implements EvaluationProvider {
-      readonly kind = 'fake' as const;
-      readonly requiresAuthentication = false;
-      calls = 0;
-      async execute(request: ProviderRequest): Promise<ProviderResult> {
-        this.calls += 1;
-        if (request.workspace === undefined) throw new Error('workspace missing');
-        await writeFile(path.join(request.workspace, 'invalid-utf8.txt'), Uint8Array.from([0xc3, 0x28]));
-        return { status: 'completion', finalOutput: 'positive-ok', elapsedMs: 7, usage: { input: 2, cachedInput: 0, output: 1 } };
-      }
-    }
-    const provider = new InvalidUtf8Provider();
+    const provider = new InvalidUtf8Provider('positive-ok');
     const result = await runEvaluation({
       specPath: fixture.specPath,
       outDirectory: path.join(fixture.root, 'run-instrument-invalid'),
