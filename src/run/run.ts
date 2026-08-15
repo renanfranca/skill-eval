@@ -22,7 +22,10 @@ export interface RunOptions {
   approveProviderCalls: string;
   provider: EvaluationProvider;
   codexHomeSource?: string;
-  now?: () => Date;
+  clock?: {
+    wallNowMs: () => number;
+    monotonicNowMs: () => number;
+  };
 }
 
 export interface RunResult {
@@ -52,6 +55,36 @@ const REEVALUATION_TRIGGERS = [
   'skill snapshot change', 'evaluation spec or fixtures change', 'candidate or judge model change',
   'reasoning effort change', 'Promptfoo or Codex SDK change', 'material environment change',
 ];
+
+const CLOCK_SKEW_LIMIT_MS = 1_000;
+
+function createRunClock(source: NonNullable<RunOptions['clock']> = {
+  wallNowMs: Date.now,
+  monotonicNowMs: () => performance.now(),
+}): { now: () => Date; maxWallClockSkewMs: () => number } {
+  const anchorWallMs = source.wallNowMs();
+  const anchorMonotonicMs = source.monotonicNowMs();
+  let lastElapsedMs = 0;
+  let maximumSkewMs = 0;
+  return {
+    now: () => {
+      const monotonicElapsedMs = Math.max(lastElapsedMs, source.monotonicNowMs() - anchorMonotonicMs);
+      lastElapsedMs = monotonicElapsedMs;
+      const anchoredWallMs = anchorWallMs + monotonicElapsedMs;
+      maximumSkewMs = Math.max(maximumSkewMs, Math.abs(source.wallNowMs() - anchoredWallMs));
+      return new Date(anchoredWallMs);
+    },
+    maxWallClockSkewMs: () => maximumSkewMs,
+  };
+}
+
+function limitationsFor(maximumClockSkewMs: number): string[] {
+  if (maximumClockSkewMs <= CLOCK_SKEW_LIMIT_MS) return [...LIMITATIONS];
+  return [
+    ...LIMITATIONS,
+    `Wall clock adjustments of up to ${Math.round(maximumClockSkewMs)} ms were observed; persisted timestamps use a run-start UTC anchor plus monotonic elapsed time, while append order and callNumber remain authoritative.`,
+  ];
+}
 
 function safeMessage(error: unknown): string {
   return redactSecrets(messageOf(error)).slice(0, 2000);
@@ -194,8 +227,8 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
     await preflightWorkspaces(packageRoot, spec, fixtures);
     await assertRunTargetAvailable(out);
     const specBytes = canonicalJson(spec);
-    const now = options.now ?? (() => new Date());
-    const reservedAt = now();
+    const clock = createRunClock(options.clock);
+    const reservedAt = clock.now();
     const cases: CaseRecord[] = [];
     const providerRecords: ProviderAccountingRecord[] = [];
     let callsAttempted = 0;
@@ -231,7 +264,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
       try {
         callsAttempted += 1;
         await appendJsonLine(path.join(out, 'case-results.jsonl'), {
-          event: 'CALL_ATTEMPTED', callNumber: callsAttempted, role: 'candidate', caseId: item.id, at: now().toISOString(),
+          event: 'CALL_ATTEMPTED', callNumber: callsAttempted, role: 'candidate', caseId: item.id, at: clock.now().toISOString(),
         });
         const result = await options.provider.execute({
           role: 'candidate', model: 'gpt-5.6-luna', reasoningEffort: 'max', prompt: item.prompt,
@@ -239,7 +272,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
           ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
         }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
         const providerRecord = providerAccountingRecord(callsAttempted, 'candidate', 'gpt-5.6-luna', result, item.id);
-        await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: now().toISOString() });
+        await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: clock.now().toISOString() });
         providerRecords.push(providerRecord);
         if (result.status !== 'completion') {
           const record: CaseRecord = {
@@ -345,14 +378,14 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
           judgeAttempted = true;
           callsAttempted += 1;
           if (callsAttempted > 4) throw integrityError('Total call budget exceeded');
-          await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_ATTEMPTED', callNumber: callsAttempted, role: 'judge', at: now().toISOString() });
+          await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_ATTEMPTED', callNumber: callsAttempted, role: 'judge', at: clock.now().toISOString() });
           const judgeResult = await options.provider.execute({
             role: 'judge', model: 'gpt-5.6-terra', reasoningEffort: 'xhigh', prompt: prepared.prompt,
             timeoutMs: 600_000, workspace: judgeWorkspace, outputSchema: getJudgeResultSchema(),
             ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
           }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
           const providerRecord = providerAccountingRecord(callsAttempted, 'judge', 'gpt-5.6-terra', judgeResult);
-          await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: now().toISOString() });
+          await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: clock.now().toISOString() });
           providerRecords.push(providerRecord);
           if (judgeResult.status !== 'completion') {
             terminalStatus = terminalStatusForResult(judgeResult);
@@ -403,7 +436,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
     const claims = assessClaims(spec, cases, semanticByCase, judgeValid === true || !judgeAttempted);
     const recommendation = recommend(claims, { instrumentInvalid, directDoNotProceed });
     const semanticAssessments = [...semanticByCase.entries()].flatMap(([caseId, criteria]) => criteria.map((criterion) => ({ caseId, ...criterion })));
-    const completedAt = now();
+    const completedAt = clock.now();
     const attempted = providerRecords.length;
     const completed = providerRecords.filter((record) => record.status === 'completion').length;
     const timeout = providerRecords.filter((record) => record.status === 'timeout').length;
@@ -420,7 +453,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
         usage: usageTotal(providerRecords),
       },
       cost: estimateApiEquivalent(providerRecords.map((record) => ({ model: record.model, ...(record.usage === undefined ? {} : { usage: record.usage }) }))),
-      limitations: LIMITATIONS,
+      limitations: limitationsFor(clock.maxWallClockSkewMs()),
       suggestedAction: suggestedAction(recommendation),
       reevaluationTriggers: REEVALUATION_TRIGGERS,
       completedAt: completedAt.toISOString(),

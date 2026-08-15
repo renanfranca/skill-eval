@@ -127,6 +127,10 @@ Runs e reports são create-only. Um run incompleto nunca é retomado: `report` o
 append-only confirmado. JSON e Markdown derivam do mesmo assessment canônico e separam observações diretas, assessments semânticos,
 claims, recomendação, custo, limitações e gatilhos de reavaliação.
 
+Timestamps de novos runs usam um anchor UTC mais progresso monotônico; a ordem autoritativa permanece append-only com `callNumber`. Ajustes
+do relógio civil acima de um segundo são registrados como limitação e não invalidam sozinhos evidência cuja sequência e duração monotônica
+continuam confirmadas. A projeção mínima do Promptfoo não persiste sua latência baseada no relógio civil.
+
 O custo monetário real da conta ChatGPT é sempre `UNKNOWN`. A estimativa API-equivalent só aparece quando a decomposição necessária de usage
 está disponível e nunca é apresentada como custo real da assinatura.
 

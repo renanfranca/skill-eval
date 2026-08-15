@@ -338,6 +338,82 @@ describe('provider-bounded run and deterministic report', () => {
     expect(nextProvider.requests).toHaveLength(0);
   });
 
+  it('anchors persisted timestamps to monotonic progress and reports material civil-clock adjustments without changing the decision', async () => {
+    const fixture = await makePackage();
+    const anchor = Date.parse('2026-08-15T12:00:00.000Z');
+    let wallMs = anchor;
+    let monotonicMs = 10_000;
+    let call = 0;
+    const provider: EvaluationProvider = {
+      kind: 'fake',
+      requiresAuthentication: false,
+      execute: () => {
+        call += 1;
+        monotonicMs += 1_000;
+        if (call === 2) wallMs += 31_000;
+        else if (call === 3) wallMs = anchor + monotonicMs - 10_000;
+        else wallMs += 1_000;
+        return Promise.resolve({
+          status: 'completion' as const,
+          finalOutput: ['positive-ok', 'invalid-ok', 'boundary-ok'][call - 1]!,
+          elapsedMs: 1_000,
+        });
+      },
+    };
+    const run = path.join(fixture.root, 'run-clock-adjustment');
+    const result = await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider,
+      clock: { wallNowMs: () => wallMs, monotonicNowMs: () => monotonicMs },
+    });
+
+    expect(result.terminal).toMatchObject({ status: 'COMPLETED', recommendation: 'PROCEED' });
+    expect(result.terminal.limitations).toContainEqual(expect.stringMatching(/Wall clock adjustments.*30000 ms.*monotonic/i));
+    const events = (await readFile(path.join(run, 'case-results.jsonl'), 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line) as { event: string; at?: string });
+    const timestamps = events.flatMap((event) => event.at === undefined ? [] : [Date.parse(event.at)]);
+    expect(timestamps.every((value, index) => index === 0 || value >= timestamps[index - 1]!)).toBe(true);
+    expect(Date.parse(result.terminal.completedAt)).toBeGreaterThanOrEqual(timestamps.at(-1)!);
+    const report = await buildReport(run);
+    expect(report.limitations).toEqual(result.terminal.limitations);
+    expect(renderMarkdown(report)).toMatch(/Wall clock adjustments.*30000 ms.*monotonic/i);
+  });
+
+  it('keeps append order authoritative when a historical civil timestamp regresses', async () => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, 'run-legacy-clock-regression');
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: new FakeProvider(completions()) });
+    const eventPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    const thirdAttempt = events.find((event) => event['event'] === 'CALL_ATTEMPTED' && event['callNumber'] === 3);
+    const thirdResult = events.find((event) => event['event'] === 'CALL_RESULT' && event['callNumber'] === 3);
+    if (thirdAttempt === undefined || thirdResult === undefined) throw new Error('Expected third call accounting events');
+    thirdAttempt['at'] = '2026-08-15T12:00:30.000Z';
+    thirdResult['at'] = '2026-08-15T12:00:15.000Z';
+    await writeFile(eventPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+
+    await expect(buildReport(run)).resolves.toMatchObject({
+      decision: { recommendation: 'PROCEED' },
+      calls: { attempted: 3, completed: 3 },
+    });
+  });
+
+  it('rejects a non-ISO accounting timestamp as corrupt evidence', async () => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, 'run-invalid-timestamp');
+    await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: new FakeProvider(completions()) });
+    const eventPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    const firstAttempt = events.find((event) => event['event'] === 'CALL_ATTEMPTED');
+    if (firstAttempt === undefined) throw new Error('Expected a call attempt');
+    firstAttempt['at'] = 'not-an-iso-timestamp';
+    await writeFile(eventPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
+  });
+
   it('refuses to overwrite an existing report file', async () => {
     const fixture = await makePackage();
     const run = path.join(fixture.root, 'run-report');

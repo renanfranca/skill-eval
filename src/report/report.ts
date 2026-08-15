@@ -105,6 +105,12 @@ function validNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function validIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
 function parseUsage(value: unknown): TokenUsage | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw integrityError('Append-only usage evidence is invalid');
@@ -176,7 +182,7 @@ function parseAccountingEvents(manifest: Manifest, events: Array<Record<string, 
       const caseId = event['caseId'];
       if (
         event['callNumber'] !== attempts.length + 1 || attempts.length >= 4 || (role !== 'candidate' && role !== 'judge') ||
-        typeof event['at'] !== 'string' || (role === 'candidate' ? typeof caseId !== 'string' || !allowedCases.has(caseId) : caseId !== undefined)
+        !validIsoTimestamp(event['at']) || (role === 'candidate' ? typeof caseId !== 'string' || !allowedCases.has(caseId) : caseId !== undefined)
       ) throw integrityError('Append-only call accounting contains a gap, duplicate, or invalid role');
       if (attempts.length !== results.length) throw integrityError('A later call was attempted before the preceding result was confirmed');
       attempts.push(event as unknown as CallAttemptEvent);
@@ -194,7 +200,7 @@ function parseAccountingEvents(manifest: Manifest, events: Array<Record<string, 
         attempt === undefined || index === 0 || events[index - 1]?.['event'] !== 'CALL_ATTEMPTED' || results.length !== attempts.length - 1 ||
         event['callNumber'] !== attempt.callNumber || role !== attempt.role || caseId !== attempt.caseId ||
         (role === 'candidate' ? model !== 'gpt-5.6-luna' : model !== 'gpt-5.6-terra') ||
-        !['completion', 'timeout', 'error'].includes(String(status)) || !validNonNegativeNumber(event['elapsedMs']) || typeof event['at'] !== 'string' ||
+        !['completion', 'timeout', 'error'].includes(String(status)) || !validNonNegativeNumber(event['elapsedMs']) || !validIsoTimestamp(event['at']) ||
         (status === 'completion' ? event['message'] !== undefined : typeof event['message'] !== 'string')
       ) throw integrityError('Append-only provider result does not match its immediately preceding attempt');
       parseUsage(event['usage']);
