@@ -67,7 +67,7 @@ export class PromptfooCodexProvider implements EvaluationProvider {
         {
           prompts: [request.prompt],
           providers: [{ id: 'openai:codex-sdk', config }],
-          tests: [{}],
+          tests: [{ vars: {} }],
           writeLatestResults: false,
         },
         {
