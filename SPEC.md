@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 | --- | --- |
-| Status | Aprovada para implementação provider-free |
+| Status | MVP provider-free concluído |
 | Data | 2026-08-15 |
 | Produto | CLI local, single-owner |
 | Runtime | Node.js 24, npm e TypeScript estrito com ESM |

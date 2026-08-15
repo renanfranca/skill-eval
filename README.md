@@ -4,7 +4,10 @@
 casos declarados pelo owner, executa checks mecânicos antes de qualquer julgamento semântico e preserva evidência sanitizada sem transformar
 três observações em alegações de estabilidade, causalidade ou generalização.
 
+**Status:** MVP provider-free concluído conforme os critérios de aceitação do `SPEC.md`.
+
 O contrato completo e canônico está em [SPEC.md](SPEC.md).
+Para instalar, configurar e operar o MVP passo a passo, consulte o [guia detalhado de uso](docs/USAGE.md).
 
 ## Requisitos e instalação
 
