@@ -21,19 +21,22 @@ describe('Promptfoo adapter', () => {
   it('supplies an explicit empty vars object for its single Promptfoo test', async () => {
     const provider = new PromptfooCodexProvider();
 
-    await expect(provider.execute({
+    const result = await provider.execute({
       role: 'candidate',
       model: 'gpt-5.6-luna',
       reasoningEffort: 'max',
       prompt: 'provider-free prompt',
       timeoutMs: 1_000,
-    })).resolves.toMatchObject({ status: 'completion', finalOutput: 'provider-free completion' });
+    });
+
+    expect(result).toMatchObject({ status: 'completion', finalOutput: 'provider-free completion' });
 
     expect(evaluate).toHaveBeenCalledOnce();
     expect(evaluate).toHaveBeenCalledWith(
       expect.objectContaining({ tests: [{ vars: {} }] }),
       expect.objectContaining({ cache: false, maxConcurrency: 1 }),
     );
+    expect(result.status === 'completion' ? result.promptfooProjection : undefined).not.toHaveProperty('latencyMs');
   });
 
   it('forwards the judge output schema unchanged as Promptfoo config.output_schema', async () => {

@@ -65,7 +65,7 @@ export function qualifiedJudgeOutput(prompt: string): string {
   return JSON.stringify({
     schemaVersion: 1,
     items: batch.items.map((item) => {
-      const verdict = item.finalOutput.startsWith('Unrelated') || item.finalOutput.startsWith('Ignore') ? 'VIOLATED' : 'SATISFIED';
+      const verdict = item.finalOutput === 'CHARLIE' || item.finalOutput.startsWith('Ignore') ? 'VIOLATED' : 'SATISFIED';
       return {
         opaqueId: item.opaqueId,
         criteria: item.criteria.map((criterion) => ({

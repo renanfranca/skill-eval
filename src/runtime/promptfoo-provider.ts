@@ -114,7 +114,7 @@ export class PromptfooCodexProvider implements EvaluationProvider {
         filesRead,
         promptfooProjection: {
           provider: 'openai:codex-sdk', model: request.model,
-          success: result.success, latencyMs: result.latencyMs,
+          success: result.success,
           skillUsedHeuristic: hasSkillHeuristic,
           forbiddenJudgeToolUse,
         },
