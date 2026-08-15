@@ -47,7 +47,7 @@ export interface PreparedJudgeBatch {
 const judgeResultSchema: Record<string, unknown> = {
   type: 'object', additionalProperties: false, required: ['schemaVersion', 'items'],
   properties: {
-    schemaVersion: { const: 1 },
+    schemaVersion: { type: 'integer', const: 1 },
     items: {
       type: 'array',
       items: {
@@ -61,8 +61,8 @@ const judgeResultSchema: Record<string, unknown> = {
               required: ['criterionId', 'verdict', 'evidenceRefs', 'assessment'],
               properties: {
                 criterionId: { type: 'string' },
-                verdict: { enum: ['SATISFIED', 'VIOLATED', 'INSUFFICIENT'] },
-                evidenceRefs: { type: 'array', items: { type: 'string' }, uniqueItems: true },
+                verdict: { type: 'string', enum: ['SATISFIED', 'VIOLATED', 'INSUFFICIENT'] },
+                evidenceRefs: { type: 'array', items: { type: 'string' } },
                 assessment: { type: 'string' },
               },
             },

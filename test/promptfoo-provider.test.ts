@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getJudgeResultSchema } from '../src/judge/batch.js';
 import { PromptfooCodexProvider } from '../src/runtime/promptfoo-provider.js';
 
 const { evaluate } = vi.hoisted(() => ({ evaluate: vi.fn() }));
@@ -33,5 +34,22 @@ describe('Promptfoo adapter', () => {
       expect.objectContaining({ tests: [{ vars: {} }] }),
       expect.objectContaining({ cache: false, maxConcurrency: 1 }),
     );
+  });
+
+  it('forwards the judge output schema unchanged as Promptfoo config.output_schema', async () => {
+    const provider = new PromptfooCodexProvider();
+    const outputSchema = getJudgeResultSchema();
+
+    await expect(provider.execute({
+      role: 'judge',
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'xhigh',
+      prompt: 'provider-free judge prompt',
+      timeoutMs: 1_000,
+      outputSchema,
+    })).resolves.toMatchObject({ status: 'completion', finalOutput: 'provider-free completion' });
+
+    const testSuite = evaluate.mock.calls[0]?.[0] as { providers?: Array<{ config?: Record<string, unknown> }> } | undefined;
+    expect(testSuite?.providers?.[0]?.config?.['output_schema']).toBe(outputSchema);
   });
 });

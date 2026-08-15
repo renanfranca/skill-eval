@@ -3,10 +3,46 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { applyDirectCheck } from '../src/evidence/checks.js';
-import { prepareJudgeBatch, validateJudgeOutput } from '../src/judge/batch.js';
+import { getJudgeResultSchema, prepareJudgeBatch, validateJudgeOutput } from '../src/judge/batch.js';
 import { directAnswers, qualifiedJudgeOutput } from './helpers.js';
 
 describe('direct evidence and opaque judge qualification', () => {
+  it('exposes the complete structured output schema expected by the Terra judge', () => {
+    expect(getJudgeResultSchema()).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      required: ['schemaVersion', 'items'],
+      properties: {
+        schemaVersion: { type: 'integer', const: 1 },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['opaqueId', 'criteria'],
+            properties: {
+              opaqueId: { type: 'string' },
+              criteria: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['criterionId', 'verdict', 'evidenceRefs', 'assessment'],
+                  properties: {
+                    criterionId: { type: 'string' },
+                    verdict: { type: 'string', enum: ['SATISFIED', 'VIOLATED', 'INSUFFICIENT'] },
+                    evidenceRefs: { type: 'array', items: { type: 'string' } },
+                    assessment: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('applies allowed direct operators without callbacks or shell', async () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-checks-'));
     await mkdir(path.join(workspace, 'out'));
@@ -47,6 +83,11 @@ describe('direct evidence and opaque judge qualification', () => {
     if (criterion === undefined) throw new Error('Expected criterion');
     criterion.evidenceRefs = ['fabricated-ref'];
     expect(validateJudgeOutput(JSON.stringify(badRef), prepared).valid).toBe(false);
+    const duplicateRefs = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<{ criteria: Array<{ evidenceRefs: string[] }> }> };
+    const criterionWithEvidence = duplicateRefs.items.find((candidate) => candidate.criteria[0]?.evidenceRefs[0] !== undefined)?.criteria[0];
+    if (criterionWithEvidence?.evidenceRefs[0] === undefined) throw new Error('Expected evidence reference');
+    criterionWithEvidence.evidenceRefs.push(criterionWithEvidence.evidenceRefs[0]);
+    expect(validateJudgeOutput(JSON.stringify(duplicateRefs), prepared).valid).toBe(false);
     const failedProbe = JSON.parse(qualifiedJudgeOutput(prepared.prompt)) as { items: Array<{ criteria: Array<{ verdict: string }> }> };
     const violated = failedProbe.items.find((candidate) => candidate.criteria[0]?.verdict === 'VIOLATED');
     if (violated?.criteria[0] === undefined) throw new Error('Expected violated probe');
