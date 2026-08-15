@@ -1,44 +1,160 @@
 # skill-eval
 
-> **Status:** specification ready; implementation not started.
+`skill-eval` é uma CLI local para avaliar uma única skill Codex sob uma condição pequena, explícita e auditável. O MVP congela a skill e três
+casos declarados pelo owner, executa checks mecânicos antes de qualquer julgamento semântico e preserva evidência sanitizada sem transformar
+três observações em alegações de estabilidade, causalidade ou generalização.
 
-`skill-eval` is a proposed Node.js and TypeScript CLI for supplying one Codex skill and receiving an automatic evaluation that is useful for
-a declared decision and defensible from preserved evidence.
+O contrato completo e canônico está em [SPEC.md](SPEC.md).
 
-The MVP deliberately stays small:
+## Requisitos e instalação
 
-- a short guided specification instead of an automatic Evaluation Author;
-- three representative Luna/max executions at most;
-- deterministic checks before one controlled Terra/xhigh semantic judgment;
-- four provider calls at most, zero retries, and explicit authorization;
-- sanitized local evidence and conditional conclusions instead of a generic “pass”.
-
-The complete contract is in [SPEC.md](SPEC.md). The project-local implementation boundaries are in [AGENTS.md](AGENTS.md).
-
-## Intended CLI
+- Node.js 24 ou posterior;
+- npm;
+- para uma execução model-backed futura, um Codex home autenticado por ChatGPT indicado explicitamente por `SKILL_EVAL_CODEX_HOME`.
 
 ```text
-skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
+npm ci
+npm run build
+node dist/cli.js --help
+```
+
+As versões do Promptfoo (`0.122.0`) e do Codex SDK (`0.147.0`) estão fixadas no lockfile. Não há API pública de biblioteca.
+
+## Comandos
+
+```text
+skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
-skill-eval report --run <run-directory> --format json|markdown [--out <file>]
+skill-eval report --run <run-directory> --format json|markdown [--out <new-file>]
 ```
 
-No command exists yet. The repository currently contains the decision-complete specification from which the MVP can be implemented.
+Cada comando e subcomando possui `--help`. `init`, `check` e `report` são sempre provider-free. `run` recusa qualquer autorização diferente do
+literal `4`, exige um diretório inexistente e não reutiliza autorização nem diretório de execução anterior.
 
-## Objective for `/goal`
+### Intake não interativo
 
-Use the following objective without assigning a token budget:
+`--answers` aponta para um JSON fechado com a decisão, claims e exatamente os casos `POSITIVE`, `INVALID_SAFETY` e `NEAR_BOUNDARY`, nessa
+ordem. O próprio fornecimento do arquivo é a confirmação não interativa do resumo nele contido. Um caso pode copiar uma fixture confinada por
+`fixtureSource` ou usar `null`. O formato completo dos checks permitidos está na seção 5 do `SPEC.md`; nenhum check aceita código, shell,
+callback, import, rede ou regex do usuário.
+
+Exemplo mínimo de estrutura:
+
+```json
+{
+  "evaluationId": "my-evaluation",
+  "decision": {
+    "question": "Should this skill be used for the declared task?",
+    "proceedMeaning": "Proceed only for the declared inputs and boundary."
+  },
+  "claims": [{
+    "id": "behavior",
+    "statement": "The skill returns the required value.",
+    "kind": "BEHAVIOR",
+    "required": true,
+    "failureDecision": "REVISE"
+  }],
+  "cases": [
+    {
+      "id": "positive-case",
+      "kind": "POSITIVE",
+      "prompt": "Return the positive value.",
+      "fixtureSource": null,
+      "claimIds": ["behavior"],
+      "activationExpectation": "NOT_ASSERTED",
+      "checks": [{
+        "id": "positive-equals", "claimId": "behavior", "operator": "FINAL_EQUALS",
+        "expected": "positive", "required": true, "failureDecision": "REVISE"
+      }],
+      "semanticCriteria": []
+    },
+    {
+      "id": "invalid-case",
+      "kind": "INVALID_SAFETY",
+      "prompt": "Handle the invalid request safely.",
+      "fixtureSource": null,
+      "claimIds": ["behavior"],
+      "activationExpectation": "NOT_ASSERTED",
+      "checks": [{
+        "id": "invalid-equals", "claimId": "behavior", "operator": "FINAL_EQUALS",
+        "expected": "refused", "required": true, "failureDecision": "DO_NOT_PROCEED"
+      }],
+      "semanticCriteria": []
+    },
+    {
+      "id": "boundary-case",
+      "kind": "NEAR_BOUNDARY",
+      "prompt": "Handle the near-boundary request.",
+      "fixtureSource": null,
+      "claimIds": ["behavior"],
+      "activationExpectation": "NOT_ASSERTED",
+      "checks": [{
+        "id": "boundary-equals", "claimId": "behavior", "operator": "FINAL_EQUALS",
+        "expected": "boundary", "required": true, "failureDecision": "REVISE"
+      }],
+      "semanticCriteria": []
+    }
+  ]
+}
+```
+
+Sem `--answers`, a CLI coleta os mesmos campos, mostra o JSON resultante e pede confirmação antes de criar o pacote.
+
+## Autorização e isolamento
+
+Uma execução real somente pode começar depois de uma autorização explícita posterior:
 
 ```text
-Implementar integralmente o MVP definido em SPEC.md. Use somente as fontes deste repositório e não descubra, leia ou invoque skills externas
-ou preexistentes. Não faça chamadas reais a providers: toda validação deve usar providers falsos e determinísticos. Conclua apenas quando
-todos os critérios provider-free de aceitação estiverem verdes, sem iniciar avaliações Luna/max ou Terra/xhigh.
+SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
+  skill-eval run --spec evaluation/evaluation-spec.json --out runs/run-001 --approve-provider-calls 4
 ```
 
-The goal may write code, tests, package metadata, and CI inside this repository. It must not execute a live evaluation, consume ChatGPT
-capacity, or weaken the authorization and isolation boundaries in the specification.
+O preflight lê apenas metadados de um `auth.json` regular. Para as chamadas, a CLI cria um Codex home privado temporário contendo somente uma
+cópia `0600` dessa autenticação, redefine `HOME`, `USERPROFILE` e `CODEX_HOME` para esse local e o apaga no `finally`. Configuração, histórico
+e skills globais não são copiados.
 
-## License
+Cada caso recebe um workspace temporário novo, fora do repositório, do pacote de avaliação e do home do usuário. Ele contém apenas
+`.agents/skills/<target>` e a fixture daquele caso. As chamadas são sequenciais, têm timeout de 600 segundos e zero retries. O teto é três
+tentativas Luna/max e, somente se necessário, um batch Terra/xhigh com quatro probes opacos. Um check direto crítico encerra antes do judge.
+
+`workspace-write` limita contexto e descoberta, mas não é uma fronteira de virtualização contra um processo malicioso executado pela mesma
+conta do sistema operacional.
+
+## Evidência e relatórios
+
+Runs e reports são create-only. Um run incompleto nunca é retomado: `report` o representa como `NO_DECISION` e mostra o último evento
+append-only confirmado. JSON e Markdown derivam do mesmo assessment canônico e separam observações diretas, assessments semânticos,
+claims, recomendação, custo, limitações e gatilhos de reavaliação.
+
+O custo monetário real da conta ChatGPT é sempre `UNKNOWN`. A estimativa API-equivalent só aparece quando a decomposição necessária de usage
+está disponível e nunca é apresentada como custo real da assinatura.
+
+## Exit codes
+
+| Código | Significado |
+| ---: | --- |
+| 0 | artefato válido, inclusive `REVISE` ou `DO_NOT_PROCEED` |
+| 2 | erro de uso, spec ou preflight antes da reserva |
+| 3 | run reservado inconclusivo por timeout, provider, ambiente ou judge inválido |
+| 4 | corrupção, tentativa de overwrite, path inseguro ou violação de integridade |
+
+## Desenvolvimento provider-free
+
+Testes usam somente o provider fake determinístico. Nenhum teste, build, exemplo ou comando de CI deve autenticar ou chamar Luna, Terra ou
+qualquer provider remoto.
+
+```text
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm pack --dry-run
+```
+
+Completar esses comandos prova o mecanismo local provider-free; não qualifica Luna/max, Terra/xhigh nem a utilidade de uma avaliação real.
+
+## Licença
 
 [MIT](LICENSE)

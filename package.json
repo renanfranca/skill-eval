@@ -1,0 +1,40 @@
+{
+  "name": "skill-eval",
+  "version": "0.1.0",
+  "description": "Provider-bounded local evaluation of a single Codex skill",
+  "type": "module",
+  "bin": {
+    "skill-eval": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SPEC.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage.enabled=false --no-file-parallelism --test-timeout=0",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "7.8.4",
+    "@openai/codex-sdk": "0.147.0",
+    "ajv": "8.17.1",
+    "promptfoo": "0.122.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.33.0",
+    "@types/node": "24.3.0",
+    "eslint": "9.33.0",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.40.0",
+    "vitest": "3.2.4"
+  },
+  "license": "MIT"
+}
