@@ -1,0 +1,7 @@
+interface:
+  display_name: "Plan to Goal"
+  short_description: "Salva o último plano para usar com /goal"
+  default_prompt: "Use $plan-to-goal para materializar o último plano finalizado desta conversa e preparar o comando /goal."
+
+policy:
+  allow_implicit_invocation: false
