@@ -45,7 +45,7 @@ Gerar e instalar um tarball são ações locais; publicação no npm não faz pa
 npm ci
 npm run build
 npm pack
-npm install --global ./skill-eval-0.2.0.tgz
+npm install --global ./skill-eval-0.2.1.tgz
 skill-eval --help
 ```
 
@@ -316,6 +316,10 @@ Todo check possui `id`, `claimId`, `operator`, `required` e `failureDecision`, a
 
 Paths de checks são relativos, normalizados em POSIX e confinados. Não use path vazio, absoluto, `..`, barra invertida ou NUL. Checks não
 aceitam código, shell, imports, callbacks, rede ou regex fornecidos pelo usuário.
+
+Em uma falha de `FILE_CONTAINS`, a observação lista os índices zero-based dos fragments ausentes; em uma falha de `FILE_EXCLUDES`, lista os
+índices zero-based dos fragments proibidos presentes. Os índices são crescentes e referenciam a ordem de `fragments` congelada na spec. O
+diagnóstico não repete os valores dos fragments nem o conteúdo final do arquivo.
 
 Use checks diretos sempre que a propriedade for resolvível mecanicamente. Reserve critérios semânticos para significado, fidelidade ou
 outcome que não possam ser determinados por igualdade, conteúdo, schema, filesystem ou duração.

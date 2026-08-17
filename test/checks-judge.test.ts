@@ -49,9 +49,43 @@ describe('direct evidence and opaque judge qualification', () => {
     await writeFile(path.join(workspace, 'out', 'value.txt'), 'alpha beta');
     const base = { finalOutput: '{"ok":true}', elapsedMs: 5, workspace, changes: [{ path: 'out/value.txt', change: 'CREATED' as const }] };
     await expect(applyDirectCheck({ id: 'json', claimId: 'c', operator: 'FINAL_JSON_SCHEMA', schema: { type: 'object', required: ['ok'] }, required: true, failureDecision: 'REVISE' }, base)).resolves.toMatchObject({ passed: true });
-    await expect(applyDirectCheck({ id: 'contains', claimId: 'c', operator: 'FILE_CONTAINS', path: 'out/value.txt', fragments: ['alpha'], required: true, failureDecision: 'REVISE' }, base)).resolves.toMatchObject({ passed: true });
+    await expect(applyDirectCheck({ id: 'contains', claimId: 'c', operator: 'FILE_CONTAINS', path: 'out/value.txt', fragments: ['alpha'], required: true, failureDecision: 'REVISE' }, base)).resolves.toMatchObject({
+      passed: true,
+      observation: 'File fragment contract is satisfied',
+    });
     await expect(applyDirectCheck({ id: 'writes', claimId: 'c', operator: 'WRITES_WITHIN', paths: ['out'], required: true, failureDecision: 'DO_NOT_PROCEED' }, base)).resolves.toMatchObject({ passed: true });
     await expect(applyDirectCheck({ id: 'elapsed', claimId: 'c', operator: 'MAX_ELAPSED_MS', maximumMs: 4, required: true, failureDecision: 'REVISE' }, base)).resolves.toMatchObject({ passed: false });
+  });
+
+  it('reports deterministic fragment indexes without persisting fragment values', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-fragment-indexes-'));
+    await mkdir(path.join(workspace, 'out'));
+    await writeFile(path.join(workspace, 'out', 'value.txt'), 'allowed-alpha allowed-beta');
+    const base = { finalOutput: '', elapsedMs: 1, workspace, changes: [] };
+
+    const contains = await applyDirectCheck({
+      id: 'contains-indexes', claimId: 'c', operator: 'FILE_CONTAINS', path: 'out/value.txt',
+      fragments: ['allowed-alpha', 'missing-secret-one', 'allowed-beta', 'missing-secret-two'],
+      required: true, failureDecision: 'REVISE',
+    }, base);
+    expect(contains).toMatchObject({
+      passed: false,
+      observation: 'Missing prespecified file fragment indexes (zero-based): 1, 3',
+    });
+    expect(contains.observation).not.toContain('missing-secret-one');
+    expect(contains.observation).not.toContain('missing-secret-two');
+
+    const excludes = await applyDirectCheck({
+      id: 'excludes-indexes', claimId: 'c', operator: 'FILE_EXCLUDES', path: 'out/value.txt',
+      fragments: ['absent-secret-one', 'allowed-alpha', 'absent-secret-two', 'allowed-beta'],
+      required: true, failureDecision: 'REVISE',
+    }, base);
+    expect(excludes).toMatchObject({
+      passed: false,
+      observation: 'Present prohibited file fragment indexes (zero-based): 1, 3',
+    });
+    expect(excludes.observation).not.toContain('allowed-alpha');
+    expect(excludes.observation).not.toContain('allowed-beta');
   });
 
   it('uses opaque randomized ids and accepts only an exactly qualified batch', () => {

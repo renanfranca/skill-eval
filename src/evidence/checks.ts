@@ -172,9 +172,15 @@ export async function applyDirectCheck(
           break;
         }
         const content = await utf8File(target);
-        const present = check.fragments.filter((fragment) => content.includes(fragment));
-        passed = check.operator === 'FILE_CONTAINS' ? present.length === check.fragments.length : present.length === 0;
-        observation = passed ? 'File fragment contract is satisfied' : 'File fragment contract is violated';
+        const relevantIndexes = check.fragments.flatMap((fragment, index) =>
+          content.includes(fragment) === (check.operator === 'FILE_EXCLUDES') ? [index] : []
+        );
+        passed = relevantIndexes.length === 0;
+        observation = passed
+          ? 'File fragment contract is satisfied'
+          : check.operator === 'FILE_CONTAINS'
+            ? `Missing prespecified file fragment indexes (zero-based): ${relevantIndexes.join(', ')}`
+            : `Present prohibited file fragment indexes (zero-based): ${relevantIndexes.join(', ')}`;
         break;
       }
       case 'WRITES_WITHIN': {

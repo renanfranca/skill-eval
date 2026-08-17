@@ -99,7 +99,7 @@ describe('activation probe', () => {
       condition: { model: string; reasoningEffort: string; maximumCalls: number; timeoutSeconds: number; retries: number };
     }>(path.join(out, 'manifest.json'));
     expect(manifest).toMatchObject({
-      cliVersion: '0.2.0',
+      cliVersion: '0.2.1',
       callsAuthorized: 3,
       digests: { skillBase: expect.stringMatching(/^sha256:/) },
       condition: { model: 'gpt-5.6-luna', reasoningEffort: 'max', maximumCalls: 3, timeoutSeconds: 600, retries: 0 },

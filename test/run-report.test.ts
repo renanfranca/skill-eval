@@ -41,6 +41,9 @@ describe('provider-bounded run and deterministic report', () => {
     expect(provider.requests.map((request) => request.role)).toEqual(['candidate', 'candidate', 'candidate']);
     expect(provider.requests.map((request) => request.model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
     await expect(access(path.join(run, 'judge-batch.json'))).rejects.toThrow();
+    await expect(readFile(path.join(run, 'manifest.json'), 'utf8').then((bytes) => JSON.parse(bytes) as unknown)).resolves.toMatchObject({
+      cliVersion: '0.2.1',
+    });
     const report = await buildReport(run);
     expect(report.directObservations).toHaveLength(3);
     expect(report.semanticAssessments).toHaveLength(0);
@@ -390,6 +393,47 @@ describe('provider-bounded run and deterministic report', () => {
     const nextProvider = new FakeProvider(completions());
     await expect(runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider: nextProvider })).rejects.toMatchObject({ exitCode: 4 });
     expect(nextProvider.requests).toHaveLength(0);
+  });
+
+  it('keeps a 0.2.0 file-fragment observation readable in a legacy run report', async () => {
+    const answers = directAnswers();
+    answers.cases[0].checks = [{
+      id: 'legacy-file-fragment', claimId: 'behavior', operator: 'FILE_CONTAINS',
+      path: '.agents/skills/sample-skill/SKILL.md', fragments: ['not-present'],
+      required: true, failureDecision: 'REVISE',
+    }];
+    const fixture = await makePackage(answers);
+    const run = path.join(fixture.root, 'run-legacy-fragment-observation');
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'completion', output: 'positive-ok' }]),
+    });
+
+    const legacyObservation = 'File fragment contract is violated';
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    const caseEvent = events.find((event) => event['event'] === 'CASE_RESULT') as { checks?: Array<{ observation: string }> } | undefined;
+    if (caseEvent?.checks?.[0] === undefined) throw new Error('Expected legacy case check evidence');
+    caseEvent.checks[0].observation = legacyObservation;
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+
+    const terminalPath = path.join(run, 'terminal.json');
+    const terminal = JSON.parse(await readFile(terminalPath, 'utf8')) as {
+      cases: Array<{ checks: Array<{ observation: string }> }>;
+      directObservations: Array<{ observation: string }>;
+    };
+    terminal.cases[0]!.checks[0]!.observation = legacyObservation;
+    terminal.directObservations[0]!.observation = legacyObservation;
+    await writeFile(terminalPath, canonicalJson(terminal));
+
+    await expect(buildReport(run)).resolves.toMatchObject({
+      directObservations: [expect.objectContaining({
+        checkId: 'legacy-file-fragment',
+        observation: legacyObservation,
+      })],
+    });
   });
 
   it('anchors persisted timestamps to monotonic progress and reports material civil-clock adjustments without changing the decision', async () => {

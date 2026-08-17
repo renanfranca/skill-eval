@@ -283,6 +283,10 @@ Cada `DirectCheck` possui `id`, `claimId`, `operator`, parâmetros, `required` e
 Não existem regex, comandos, imports, funções, rede ou callbacks fornecidos pelo usuário. Caminhos são relativos, normalizados em POSIX, não
 podem ser vazios, absolutos, conter `..`, NUL ou resolver por symlink.
 
+Quando `FILE_CONTAINS` falha, a observação registra os índices zero-based dos fragments prespecificados ausentes; quando `FILE_EXCLUDES`
+falha, registra os índices zero-based dos fragments proibidos presentes. Os índices seguem a ordem congelada na spec, em ordem crescente, e
+os diagnostics não repetem os valores dos fragments nem o conteúdo final do arquivo.
+
 ### 5.2 Critérios semânticos
 
 Cada `SemanticCriterion` contém `id`, `claimId`, `statement` e `required`. Ele descreve uma propriedade que não pode ser resolvida pelos checks
