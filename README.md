@@ -34,7 +34,8 @@ skill-eval report --run <run-directory> --format json|markdown [--out <new-file>
 ```
 
 Cada comando e subcomando possui `--help`. `init`, `check` e `report` são sempre provider-free. `run` aceita somente a autorização literal `4`;
-`probe-activation`, somente `3`. Ambos exigem um diretório inexistente e não reutilizam autorização nem artefato anterior.
+`probe-activation`, somente `3`. Ambos exigem um diretório inexistente e não reutilizam autorização nem artefato anterior. O output do probe
+também precisa ficar fora do pacote de avaliação congelado.
 
 ### Intake não interativo
 

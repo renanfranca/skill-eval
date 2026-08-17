@@ -174,8 +174,9 @@ exige que o arquivo ainda não exista. Um run incompleto produz `NO_DECISION` e 
 ### 4.5 `probe-activation`
 
 `probe-activation` é uma execução independente que valida o pacote congelado, exige um diretório de saída inexistente e requer exatamente
-`--approve-provider-calls 3`. Variantes numericamente equivalentes como `03`, `3.0`, `3e0` e `+3` são rejeitadas antes da reserva ou de qualquer
-chamada.
+`--approve-provider-calls 3`. O diretório de saída resolvido não pode ser igual nem descendente do diretório do pacote de avaliação; essa
+sobreposição é um path inseguro e precisa ser rejeitada antes da reserva ou de qualquer chamada. Variantes numericamente equivalentes como
+`03`, `3.0`, `3e0` e `+3` também são rejeitadas antes da reserva ou de qualquer chamada.
 
 O probe reutiliza os três casos, prompts e fixtures da spec sem modificar o pacote de avaliação. Para cada caso, gera um marcador aleatório
 de 128 bits, instrumenta somente a cópia temporária de `SKILL.md` dentro de um workspace novo e executa uma chamada Luna/max. Nunca chama
@@ -477,7 +478,8 @@ em outro diretório e com nova autorização literal; ele é uma observação se
 ### 8.5 Probe independente de ativação
 
 Antes de reservar o diretório do probe, aplicar as mesmas validações provider-free de pacote, autenticação, workspaces possíveis e destino
-create-only usadas por `run`. O probe registra o digest canônico da spec, o digest da skill base e os digests atuais das três fixtures.
+create-only usadas por `run`, além de exigir que o destino esteja fora do pacote de avaliação congelado. O probe registra o digest canônico
+da spec, o digest da skill base e os digests atuais das três fixtures.
 
 Para cada caso, em ordem `POSITIVE`, `INVALID_SAFETY` e `NEAR_BOUNDARY`:
 
@@ -753,7 +755,10 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - path e writes não escapam do workspace;
 - output da skill e probes de injection são tratados como dados;
 - cleanup remove auth material temporário no caminho normal e em errors capturáveis.
-- instrumentação do probe ocorre somente em `SKILL.md` regular dentro do workspace temporário e cada workspace é removido no `finally`.
+- instrumentação do probe ocorre somente em `SKILL.md` regular dentro do workspace temporário e cada workspace é removido no `finally`;
+- destino do probe igual ou descendente do pacote congelado é rejeitado sem criar artefato, alterar o pacote ou chamar provider;
+- uma cópia temporária de `SKILL.md` somente-leitura pode ser instrumentada sem alterar o modo observado pelo provider, pela origem ou pelo
+  snapshot;
 
 ### 15.4 Evidência e judge
 

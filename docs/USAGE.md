@@ -444,6 +444,9 @@ Somente o texto literal `3` é aceito; `03`, `3.0`, `3e0` e `+3` falham antes da
 Timeout e erro de provider consomem uma tentativa, mas não impedem os casos seguintes. Falha de integridade, sanitização ou ambiente
 interrompe quando continuar deixaria de ser seguro. O teto é exatamente três tentativas Luna/max; Terra nunca é chamado.
 
+O diretório indicado por `--out` precisa não existir e deve ficar fora de todo o pacote de avaliação (spec, snapshot e fixtures). Um destino
+igual ou descendente desse pacote é rejeitado como path inseguro antes de criar artefatos ou chamar o provider.
+
 O diretório create-only contém:
 
 ```text

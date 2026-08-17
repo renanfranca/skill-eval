@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { constants, lstat, mkdir, open } from 'node:fs/promises';
+import { constants, lstat, mkdir, open, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { integrityError, messageOf, usageError } from '../errors.js';
 import { estimateApiEquivalent } from '../evidence/cost.js';
@@ -148,6 +148,10 @@ function isWithin(parent: string, candidate: string): boolean {
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
 }
 
+function isSameOrWithin(parent: string, candidate: string): boolean {
+  return path.resolve(parent) === path.resolve(candidate) || isWithin(parent, candidate);
+}
+
 async function instrumentSkillMd(
   workspace: string,
   spec: EvaluationSpec,
@@ -158,26 +162,63 @@ async function instrumentSkillMd(
   if (!isWithin(workspace, skillMd)) throw integrityError('Activation probe SKILL.md escaped its temporary workspace');
   const baseTree = await scanTree(skillDirectory, { requireSkillMd: true });
   if (baseTree.digest !== spec.skill.sha256) throw integrityError('Base skill digest changed before activation instrumentation');
+  const baseSkillMd = baseTree.entries.find((entry) => entry.path === 'SKILL.md');
+  if (baseSkillMd === undefined) throw integrityError('Base skill is missing SKILL.md before activation instrumentation');
   await assertPathHasNoSymlinkComponents(skillMd);
 
   const bytes = Buffer.from(activationInstruction(marker), 'utf8');
-  const handle = await open(skillMd, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  const guard = await open(skillMd, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let writer: FileHandle | undefined;
+  let originalMode = 0;
+  let permissionsChanged = false;
   try {
-    const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || before.nlink !== 1n) throw integrityError('Activation probe SKILL.md must be one regular non-hardlinked file');
-    await handle.writeFile(bytes);
-    await handle.sync();
-    const after = await handle.stat({ bigint: true });
+    const original = await guard.stat({ bigint: true });
+    if (!original.isFile() || original.nlink !== 1n) {
+      throw integrityError('Activation probe SKILL.md must be one regular non-hardlinked file');
+    }
+    originalMode = Number(original.mode & BigInt(0o777));
+    if (originalMode !== baseSkillMd.mode) {
+      throw integrityError('Activation probe SKILL.md mode changed before instrumentation');
+    }
+    if ((originalMode & 0o200) === 0) {
+      await guard.chmod(originalMode | 0o200);
+      permissionsChanged = true;
+    }
+
+    writer = await open(skillMd, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+    const before = await writer.stat({ bigint: true });
+    const writableMode = originalMode | 0o200;
+    if (
+      !before.isFile() || before.nlink !== 1n || original.dev !== before.dev || original.ino !== before.ino ||
+      original.size !== before.size || Number(before.mode & BigInt(0o777)) !== writableMode
+    ) {
+      throw integrityError('Activation probe SKILL.md changed unexpectedly before instrumentation');
+    }
+    await writer.writeFile(bytes);
+    await writer.sync();
+    const after = await writer.stat({ bigint: true });
     if (
       !after.isFile() || after.nlink !== 1n || before.dev !== after.dev || before.ino !== after.ino ||
-      after.size !== before.size + BigInt(bytes.byteLength)
+      after.size !== before.size + BigInt(bytes.byteLength) || Number(after.mode & BigInt(0o777)) !== writableMode
     ) {
       throw integrityError('Activation probe SKILL.md changed unexpectedly during instrumentation');
     }
   } finally {
-    await handle.close();
+    try {
+      if (permissionsChanged) await guard.chmod(originalMode);
+    } finally {
+      try {
+        await writer?.close();
+      } finally {
+        await guard.close();
+      }
+    }
   }
   const instrumentedTree = await scanTree(skillDirectory, { requireSkillMd: true });
+  const instrumentedSkillMd = instrumentedTree.entries.find((entry) => entry.path === 'SKILL.md');
+  if (instrumentedSkillMd === undefined || instrumentedSkillMd.mode !== originalMode) {
+    throw integrityError('Activation probe SKILL.md mode was not restored after instrumentation');
+  }
   if (instrumentedTree.digest === baseTree.digest) throw integrityError('Activation instrumentation did not change the temporary skill digest');
   return { baseSkillDigest: baseTree.digest, instrumentedSkillDigest: instrumentedTree.digest };
 }
@@ -246,6 +287,9 @@ export async function runActivationProbe(options: ActivationProbeOptions): Promi
   const spec = await checkEvaluationPackage(absoluteSpec);
   const packageRoot = path.dirname(absoluteSpec);
   const out = path.resolve(options.outDirectory);
+  if (isSameOrWithin(packageRoot, out)) {
+    throw integrityError('Probe output must be outside the frozen evaluation package');
+  }
   let temporaryHome: TemporaryCodexHome | undefined;
   try {
     if (options.provider.requiresAuthentication) temporaryHome = await prepareTemporaryCodexHome(options.codexHomeSource);

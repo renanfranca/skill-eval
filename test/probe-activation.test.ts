@@ -1,10 +1,12 @@
-import { access, lstat, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { initializeEvaluation } from '../src/intake/init.js';
+import { scanTree } from '../src/intake/tree.js';
 import { runActivationProbe } from '../src/probe/probe.js';
 import type { EvaluationProvider, ProviderRequest, ProviderResult } from '../src/runtime/provider.js';
 import { canonicalJson } from '../src/spec/canonical.js';
+import { checkEvaluationPackage } from '../src/spec/validate.js';
 import { directAnswers, FIXED_DATE, makePackage } from './helpers.js';
 
 const MARKER_PATTERN = /🔧\[skill-eval:([a-f0-9]{32})\]/g;
@@ -17,6 +19,7 @@ class WorkspaceProbeProvider implements EvaluationProvider {
   readonly requests: ProviderRequest[] = [];
   readonly markers: string[] = [];
   readonly workspacePaths: string[] = [];
+  readonly skillMdModes: number[] = [];
   private cursor = 0;
 
   constructor(private readonly steps: ProbeStep[]) {}
@@ -25,7 +28,9 @@ class WorkspaceProbeProvider implements EvaluationProvider {
     this.requests.push(structuredClone(request));
     if (request.workspace === undefined) throw new Error('Probe workspace missing');
     this.workspacePaths.push(request.workspace);
-    const skillMd = await readFile(path.join(request.workspace, '.agents', 'skills', 'sample-skill', 'SKILL.md'), 'utf8');
+    const skillMdPath = path.join(request.workspace, '.agents', 'skills', 'sample-skill', 'SKILL.md');
+    const skillMd = await readFile(skillMdPath, 'utf8');
+    this.skillMdModes.push((await lstat(skillMdPath)).mode & 0o777);
     const markers = [...skillMd.matchAll(MARKER_PATTERN)].map((match) => match[0]);
     expect(markers).toHaveLength(1);
     const marker = markers[0]!;
@@ -215,6 +220,72 @@ describe('activation probe', () => {
     })).rejects.toMatchObject({ exitCode: 4 });
     expect(await readFile(path.join(existing, 'sentinel.txt'), 'utf8')).toBe('preserve');
     expect(provider.requests).toHaveLength(0);
+  });
+
+  it('rejects output inside the frozen evaluation package without modifying it or calling the provider', async () => {
+    const fixture = await makePackage();
+    const provider = new WorkspaceProbeProvider(['marker', 'marker', 'marker']);
+    const packageBefore = await scanTree(fixture.evaluation);
+    const originalSpec = await readFile(fixture.specPath);
+    const out = path.join(fixture.evaluation, 'skill-snapshot', 'probe-output');
+
+    await expect(runActivationProbe({
+      specPath: fixture.specPath,
+      outDirectory: out,
+      approveProviderCalls: '3',
+      provider,
+    })).rejects.toMatchObject({ exitCode: 4 });
+
+    expect(provider.requests).toHaveLength(0);
+    await expect(access(out)).rejects.toThrow();
+    expect(await readFile(fixture.specPath)).toEqual(originalSpec);
+    expect((await scanTree(fixture.evaluation)).digest).toBe(packageBefore.digest);
+    await expect(checkEvaluationPackage(fixture.specPath)).resolves.toMatchObject({ evaluationId: 'evaluation-test' });
+  });
+
+  it('instruments a read-only temporary SKILL.md and restores its frozen mode before provider execution', async () => {
+    const fixture = await makePackage();
+    const sourceSkillMd = path.join(fixture.skill, 'SKILL.md');
+    await chmod(sourceSkillMd, 0o444);
+    const sourceBytes = await readFile(sourceSkillMd);
+    const evaluation = path.join(fixture.root, 'evaluation-read-only');
+    await initializeEvaluation({
+      skillDirectory: fixture.skill,
+      outDirectory: evaluation,
+      answers: directAnswers(),
+      now: () => FIXED_DATE,
+    });
+    const specPath = path.join(evaluation, 'evaluation-spec.json');
+    const snapshotSkillMd = path.join(evaluation, 'skill-snapshot', 'SKILL.md');
+    const snapshotBytes = await readFile(snapshotSkillMd);
+    await expect(checkEvaluationPackage(specPath)).resolves.toMatchObject({ evaluationId: 'evaluation-test' });
+
+    const provider = new WorkspaceProbeProvider(['marker', 'marker', 'marker']);
+    const result = await runActivationProbe({
+      specPath,
+      outDirectory: path.join(fixture.root, 'probe-read-only'),
+      approveProviderCalls: '3',
+      provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      terminal: { status: 'CONFIRMED', calls: { attempted: 3, completed: 3, timeout: 0, error: 0 } },
+    });
+    expect(provider.requests.map((request) => `${request.role}/${request.model}/${request.reasoningEffort}`)).toEqual([
+      'candidate/gpt-5.6-luna/max',
+      'candidate/gpt-5.6-luna/max',
+      'candidate/gpt-5.6-luna/max',
+    ]);
+    if (process.platform !== 'win32') {
+      expect(provider.skillMdModes).toEqual([0o444, 0o444, 0o444]);
+      expect((await lstat(sourceSkillMd)).mode & 0o777).toBe(0o444);
+      expect((await lstat(snapshotSkillMd)).mode & 0o777).toBe(0o444);
+    }
+    expect(await readFile(sourceSkillMd)).toEqual(sourceBytes);
+    expect(await readFile(snapshotSkillMd)).toEqual(snapshotBytes);
+    await expect(checkEvaluationPackage(specPath)).resolves.toMatchObject({ evaluationId: 'evaluation-test' });
+    for (const workspace of provider.workspacePaths) await expect(access(workspace)).rejects.toThrow();
   });
 
   it('writes canonical terminal JSON and does not expose the frozen spec as a mutable copy', async () => {
