@@ -8,6 +8,7 @@ coverage/
 # Evaluation inputs and run evidence are local and may contain sensitive data.
 evaluations/
 runs/
+probes/
 .skill-eval/
 
 # Editor and operating-system files.

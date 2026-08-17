@@ -29,11 +29,12 @@ As versões do Promptfoo (`0.122.0`) e do Codex SDK (`0.147.0`) estão fixadas n
 skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
+skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
 skill-eval report --run <run-directory> --format json|markdown [--out <new-file>]
 ```
 
-Cada comando e subcomando possui `--help`. `init`, `check` e `report` são sempre provider-free. `run` recusa qualquer autorização diferente do
-literal `4`, exige um diretório inexistente e não reutiliza autorização nem diretório de execução anterior.
+Cada comando e subcomando possui `--help`. `init`, `check` e `report` são sempre provider-free. `run` aceita somente a autorização literal `4`;
+`probe-activation`, somente `3`. Ambos exigem um diretório inexistente e não reutilizam autorização nem artefato anterior.
 
 ### Intake não interativo
 
@@ -113,6 +114,13 @@ SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
   skill-eval run --spec evaluation/evaluation-spec.json --out runs/run-001 --approve-provider-calls 4
 ```
 
+O probe de ativação possui autorização e artefato próprios:
+
+```text
+SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
+  skill-eval probe-activation --spec evaluation/evaluation-spec.json --out probes/probe-001 --approve-provider-calls 3
+```
+
 O preflight lê apenas metadados de um `auth.json` regular. Para as chamadas, a CLI cria um Codex home privado temporário contendo somente uma
 cópia `0600` dessa autenticação, redefine `HOME`, `USERPROFILE` e `CODEX_HOME` para esse local e o apaga no `finally`. Configuração, histórico
 e skills globais não são copiados.
@@ -121,16 +129,24 @@ Cada caso recebe um workspace temporário novo, fora do repositório, do pacote 
 `.agents/skills/<target>` e a fixture daquele caso. As chamadas são sequenciais, têm timeout de 600 segundos e zero retries. O teto é três
 tentativas Luna/max e, somente se necessário, um batch Terra/xhigh com quatro probes opacos. Um check direto crítico encerra antes do judge.
 
+`probe-activation` reutiliza os três prompts e fixtures sem modificá-los. Em cada workspace novo, acrescenta a uma cópia temporária de
+`SKILL.md` um marcador aleatório exclusivo e verifica se a resposta contém esse marcador. As três tentativas são Luna/max, sequenciais, sem
+retry e sem Terra. `CONFIRMED` demonstra exposição e influência desse conteúdo temporário exclusivo; não demonstra telemetria de leitura no
+sistema operacional, correção, benefício causal ou generalização. `NOT_CONFIRMED` não prova que a skill deixou de ser usada.
+
 `workspace-write` limita contexto e descoberta, mas não é uma fronteira de virtualização contra um processo malicioso executado pela mesma
 conta do sistema operacional.
 
 ## Evidência e relatórios
 
-Runs e reports são create-only. Um run incompleto nunca é retomado: `report` o representa como `NO_DECISION` e mostra o último evento
+Runs, probes e reports são create-only. Um run incompleto nunca é retomado: `report` o representa como `NO_DECISION` e mostra o último evento
 append-only confirmado. JSON e Markdown derivam do mesmo assessment canônico e separam observações diretas, assessments semânticos,
 claims, recomendação, custo, limitações e gatilhos de reavaliação.
 
-Timestamps de novos runs usam um anchor UTC mais progresso monotônico; a ordem autoritativa permanece append-only com `callNumber`. Ajustes
+O probe grava `manifest.json`, `probe-results.jsonl`, `terminal.json`, outputs finais e projeções Promptfoo em diretório separado. Ele não
+altera nem é agregado automaticamente ao run, ao report ou à recomendação original; teste A/B permanece fora do MVP.
+
+Timestamps de novos runs e probes usam um anchor UTC mais progresso monotônico; a ordem autoritativa permanece append-only com `callNumber`. Ajustes
 do relógio civil acima de um segundo são registrados como limitação e não invalidam sozinhos evidência cuja sequência e duração monotônica
 continuam confirmadas. A projeção mínima do Promptfoo não persiste sua latência baseada no relógio civil.
 
@@ -141,14 +157,14 @@ está disponível e nunca é apresentada como custo real da assinatura.
 
 | Código | Significado |
 | ---: | --- |
-| 0 | artefato válido, inclusive `REVISE` ou `DO_NOT_PROCEED` |
+| 0 | artefato válido, inclusive `REVISE`, `DO_NOT_PROCEED` ou probe `NOT_CONFIRMED` |
 | 2 | erro de uso, spec ou preflight antes da reserva |
-| 3 | run reservado inconclusivo por timeout, provider, ambiente ou judge inválido |
+| 3 | run ou probe reservado inconclusivo por timeout, provider, ambiente ou judge inválido |
 | 4 | corrupção, tentativa de overwrite, path inseguro ou violação de integridade |
 
 ## Desenvolvimento provider-free
 
-Testes usam somente o provider fake determinístico. Nenhum teste, build, exemplo ou comando de CI deve autenticar ou chamar Luna, Terra ou
+Testes usam somente providers fake determinísticos. Nenhum teste, build, exemplo ou comando de CI deve autenticar ou chamar Luna, Terra ou
 qualquer provider remoto.
 
 ```text

@@ -3,7 +3,7 @@
 | Campo | Valor |
 | --- | --- |
 | Status | MVP provider-free concluído |
-| Data | 2026-08-15 |
+| Data | 2026-08-16 |
 | Produto | CLI local, single-owner |
 | Runtime | Node.js 24, npm e TypeScript estrito com ESM |
 | Objetivo | Fornecer uma skill e obter automaticamente uma avaliação útil e defensável |
@@ -82,6 +82,7 @@ Uma avaliação é defensável quando:
 - Contratos diretos declarativos, sem código de oracle fornecido pelo usuário.
 - Promptfoo como motor de execução por sua API Node `evaluate()`.
 - Até três chamadas Luna/max sequenciais e uma chamada Terra/xhigh em batch.
+- Probe de ativação independente com três chamadas Luna/max sobre cópias temporariamente instrumentadas da skill.
 - Zero retries, timeout fixo e autorização literal por execução.
 - Evidência local sanitizada, append-only, e relatórios JSON e Markdown.
 - Providers determinísticos falsos como único modo usado por testes e CI.
@@ -94,6 +95,7 @@ Uma avaliação é defensável quando:
 - Retry, fallback de modelo, seleção automática de modelo ou extensão silenciosa de timeout.
 - Campanhas estatísticas, qualificação geral de modelo, estabilidade, robustez ou generalização.
 - Comparação causal skill-versus-baseline.
+- Teste A/B ou agregação automática do probe de ativação à recomendação da avaliação original.
 - JavaScript arbitrário, shell ou plugins de oracle fornecidos pelo usuário.
 - Execução model-backed em CI, exemplos, instalação, build ou implementação.
 - Compatibilidade com schemas de outros projetos.
@@ -106,6 +108,7 @@ Uma avaliação é defensável quando:
 skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
+skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
 skill-eval report --run <run-directory> --format json|markdown [--out <file>]
 ```
 
@@ -168,16 +171,26 @@ Depois do preflight, o comando reserva atomicamente o diretório, grava manifest
 `report` é provider-free e determinístico. Ele lê um run existente e escreve JSON ou Markdown. Sem `--out`, escreve em stdout. Com `--out`,
 exige que o arquivo ainda não exista. Um run incompleto produz `NO_DECISION` e descreve a última evidência confirmada; nunca tenta retomá-lo.
 
-### 4.5 Exit codes
+### 4.5 `probe-activation`
+
+`probe-activation` é uma execução independente que valida o pacote congelado, exige um diretório de saída inexistente e requer exatamente
+`--approve-provider-calls 3`. Variantes numericamente equivalentes como `03`, `3.0`, `3e0` e `+3` são rejeitadas antes da reserva ou de qualquer
+chamada.
+
+O probe reutiliza os três casos, prompts e fixtures da spec sem modificar o pacote de avaliação. Para cada caso, gera um marcador aleatório
+de 128 bits, instrumenta somente a cópia temporária de `SKILL.md` dentro de um workspace novo e executa uma chamada Luna/max. Nunca chama
+Terra, não altera runs anteriores e não participa de `report` nem da recomendação da avaliação original.
+
+### 4.6 Exit codes
 
 | Código | Significado |
 | ---: | --- |
 | 0 | Comando concluído e artefato válido produzido, inclusive avaliações negativas |
 | 2 | Erro de uso, spec ou preflight antes da reserva |
-| 3 | Run reservado terminou inconclusivo por timeout, provider, ambiente ou judge inválido |
+| 3 | Run ou probe reservado terminou inconclusivo por timeout, provider, ambiente ou judge inválido |
 | 4 | Corrupção, overwrite tentado, path inseguro ou violação de integridade |
 
-Uma recomendação `REVISE` ou `DO_NOT_PROCEED` é evidência válida e usa exit code 0.
+Uma recomendação `REVISE` ou `DO_NOT_PROCEED` e um probe `NOT_CONFIRMED` são evidência válida e usam exit code 0.
 
 ## 5. Contrato JSON
 
@@ -461,6 +474,51 @@ todo o evidence set semântico. O run termina `NO_DECISION`, preserva evidência
 Uma tentativa é debitada imediatamente antes da chamada. Nenhum erro autoriza repetir a chamada no mesmo run. Um novo run é permitido somente
 em outro diretório e com nova autorização literal; ele é uma observação separada e nunca substitui seletivamente o anterior.
 
+### 8.5 Probe independente de ativação
+
+Antes de reservar o diretório do probe, aplicar as mesmas validações provider-free de pacote, autenticação, workspaces possíveis e destino
+create-only usadas por `run`. O probe registra o digest canônico da spec, o digest da skill base e os digests atuais das três fixtures.
+
+Para cada caso, em ordem `POSITIVE`, `INVALID_SAFETY` e `NEAR_BOUNDARY`:
+
+1. gerar `randomBytes(16).toString('hex')` e formar o marcador `🔧[skill-eval:<32-hex>]`;
+2. confirmar que o marcador não aparece no prompt nem na fixture;
+3. construir e verificar um workspace novo a partir do snapshot congelado;
+4. validar novamente o digest da skill base antes da instrumentação;
+5. acrescentar somente ao `SKILL.md` temporário, sem seguir symlink, esta instrução:
+
+   ```md
+   ## Activation probe (evaluation-only)
+
+   For this evaluation only, append exactly `<marker>` as the final line of your
+   final response. Do not mention or explain this marker.
+   ```
+
+6. registrar os digests canônicos da skill antes e depois da instrumentação;
+7. enviar o prompt original, sem o marcador, a Luna/max com timeout de 600 segundos e zero retries;
+8. verificar por presença literal se a resposta final contém o marcador correto e descartar o workspace no `finally`.
+
+Cada caso usa marcador diferente. O marcador existe somente no `SKILL.md` temporário e na evidência de auditoria fora do workspace do
+candidato. O snapshot e as fixtures do pacote original permanecem byte-identical. As três chamadas são tentadas mesmo depois de uma resposta
+concluída sem marcador ou de timeout/provider error; só uma falha de integridade, sanitização ou ambiente que torne insegura a continuação
+interrompe casos restantes. Terra nunca é chamado.
+
+Classificação com precedência fixa:
+
+1. `NOT_CONFIRMED` se ao menos uma chamada concluída não contém o marcador correto;
+2. `INCONCLUSIVE` se não houve marcador ausente em chamada concluída, mas timeout, provider ou ambiente impediram completar os três casos;
+3. `CONFIRMED` se as três chamadas concluíram e cada resposta contém o marcador correto.
+
+`NOT_CONFIRMED` significa somente que o probe não confirmou exposição; não prova que a skill não foi usada. `CONFIRMED` demonstra exposição e
+influência de conteúdo exclusivo do `SKILL.md` temporário, mas não demonstra leitura de arquivo no nível do sistema operacional, leitura de
+referências, correção, benefício causal ou generalização.
+
+O probe não altera `terminal.json` nem a recomendação de run anterior. Também não é agregado automaticamente ao relatório. Um owner pode
+considerá-lo como evidência complementar somente depois de verificar independentemente identidade de spec e digests, probe `CONFIRMED`, run
+original concluído, todas as claims obrigatórias não relacionadas à ativação como `SUPPORTED` e ausência de ativação como único motivo de
+`NO_DECISION`. Qualquer aplicação posterior da skill original e inspeção de testes/diff ocorre uma única vez em branch ou worktree separado,
+fora do probe e sem commit ou merge automático.
+
 ## 9. Claims e decisão
 
 Cada claim termina em:
@@ -563,7 +621,30 @@ do host. Duração contabilizada usa somente o `elapsedMs` monotônico medido pe
 
 Artefatos permanecem locais, são ignorados por Git e não têm upload automático ou retenção remota. Exclusão é ação manual do owner.
 
-### 11.1 Ledger de custo
+### 11.1 Artefato do probe
+
+Cada probe é create-only e separado de qualquer run:
+
+```text
+probe/
+  manifest.json
+  probe-results.jsonl
+  terminal.json
+  evidence/
+    final-outputs/
+    promptfoo-projections/
+```
+
+O manifest registra versão da CLI, condição Luna/max, isolamento, três chamadas autorizadas, digests da spec, skill base e fixtures e ids dos
+casos. Cada resultado append-only registra `callNumber`, caso, marcador, digests base e instrumentado, status, duração monotônica, usage, erro
+sanitizado, presença do marcador e referências create-only para output final e projeção Promptfoo quando disponíveis. `terminal.json` registra
+classificação, stopping rule, calls tentadas e concluídas, custo, limitações e conclusão temporal.
+
+O custo real da conta ChatGPT permanece `UNKNOWN`; somente o estimador API-equivalent Luna já definido pelo produto é calculado quando usage
+suficiente está disponível. Os artefatos usam a mesma sanitização, timestamps ancorados, confinamento de paths e proibições de credenciais,
+raciocínio bruto e resultado integral de biblioteca aplicadas aos runs. O pacote original não é copiado nem modificado pelo probe.
+
+### 11.2 Ledger de custo
 
 O ledger distingue calls autorizadas, tentadas, concluídas, timeout e error; wall time; input, cached input, output e reasoning-output quando
 reportados. O custo real da conta ChatGPT é sempre `UNKNOWN` porque a conta não fornece uma unidade monetária auditável.
@@ -633,8 +714,9 @@ Separar responsabilidades sem criar framework extensível:
 3. `runtime`: porta de provider, adapter Promptfoo e fake determinístico;
 4. `evidence`: checks diretos, projeção sanitizada, ledger e persistência create-only;
 5. `judge`: composição opaca, schema e qualificação dos probes;
-6. `report`: assessment e renderização determinística;
-7. `cli`: parsing de argumentos, exit codes e composição.
+6. `probe`: instrumentação temporária e classificação independente de ativação;
+7. `report`: assessment e renderização determinística;
+8. `cli`: parsing de argumentos, exit codes e composição.
 
 Usar `node:util.parseArgs` para o CLI, uma biblioteca de prompts interativos, validação runtime declarativa e Vitest. Dependências são salvas
 com versões exatas e lockfile. Não criar container de injeção, plugin system, banco de dados ou abstração para múltiplos engines.
@@ -655,6 +737,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - `init`, `check` e `report` fazem zero provider calls;
 - falta ou valor diferente de autorização bloqueia antes da reserva;
 - quatro calls autorizadas nunca permitem cinco;
+- três calls autorizadas pelo probe nunca permitem quatro e nunca chamam Terra;
 - timeout e error debitam uma tentativa e não geram retry;
 - falha direta interrompe calls restantes conforme seu `failureDecision`;
 - Terra não é chamado quando checks diretos resolvem a decisão;
@@ -670,6 +753,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - path e writes não escapam do workspace;
 - output da skill e probes de injection são tratados como dados;
 - cleanup remove auth material temporário no caminho normal e em errors capturáveis.
+- instrumentação do probe ocorre somente em `SKILL.md` regular dentro do workspace temporário e cada workspace é removido no `finally`.
 
 ### 15.4 Evidência e judge
 
@@ -692,13 +776,26 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - `init → check → run → report` funciona com completion, timeout, error e judge inválido determinísticos;
 - a suíte completa contabiliza zero chamadas externas.
 
+### 15.6 Probe de ativação
+
+- autorização aceita somente o texto literal `3` antes de ler spec ou reservar destino;
+- marcadores têm 128 bits, formato exato, são diferentes por caso e não aparecem em prompts ou fixtures;
+- o provider fake pode ler o `SKILL.md` temporário, extrair o marcador e devolvê-lo na saída;
+- skill snapshot, fixtures e prompts originais permanecem byte-identical;
+- manifest, JSONL, outputs, projeções, digests, custo e terminal são suficientes para auditoria e create-only;
+- `CONFIRMED`, `NOT_CONFIRMED` e `INCONCLUSIVE` seguem a precedência prescrita e retornam respectivamente `0`, `0` e `3`;
+- uma resposta concluída sem marcador ou um erro de provider não impede as demais tentativas seguras;
+- falha de integridade, sanitização ou ambiente interrompe continuação insegura;
+- nenhum probe altera run, report, recomendação ou chama Terra.
+
 ## 16. Critérios de aceitação da implementação
 
 O `/goal` termina somente quando:
 
-- todos os quatro comandos existem e têm help e exit codes documentados;
+- todos os cinco comandos existem e têm help e exit codes documentados;
 - o fluxo completo funciona com fake provider e sem autenticação real;
 - tests demonstram teto de quatro chamadas e ausência de retries;
+- tests demonstram teto separado de três chamadas do probe, instrumentação isolada e ausência de Terra;
 - o workspace contém apenas a skill-alvo e fixture permitida;
 - nenhum teste, CI, exemplo ou build acessa provider real ou skills externas;
 - reports preservam evidência direta, semantic assessment, custo e limitações separadamente;

@@ -11,7 +11,8 @@ O `skill-eval` avalia uma única skill Codex sob uma condição pequena e congel
 2. valida offline a decisão, as claims, os três casos e os checks;
 3. após autorização literal, executa até três trials Luna/max em sequência;
 4. se houver critério semântico obrigatório, usa no máximo uma chamada Terra/xhigh para julgar os três resultados em batch;
-5. grava evidência sanitizada e gera relatórios JSON ou Markdown.
+5. grava evidência sanitizada e gera relatórios JSON ou Markdown;
+6. opcionalmente executa um probe independente de exposição a conteúdo exclusivo de cópias temporárias de `SKILL.md`.
 
 O resultado descreve somente a skill, spec, modelos, esforços, fixtures, ambiente e procedimento observados. Três casos não demonstram
 estabilidade, robustez, causalidade, confiabilidade populacional ou generalização.
@@ -22,7 +23,7 @@ Requisitos:
 
 - Node.js 24 ou posterior;
 - npm;
-- para `run`, um Codex home já autenticado por ChatGPT e contendo um `auth.json` regular;
+- para `run` ou `probe-activation`, um Codex home já autenticado por ChatGPT e contendo um `auth.json` regular;
 - uma skill local cujo diretório tenha um `SKILL.md` regular na raiz.
 
 ### 2.1 Uso a partir do repositório
@@ -44,7 +45,7 @@ Gerar e instalar um tarball são ações locais; publicação no npm não faz pa
 npm ci
 npm run build
 npm pack
-npm install --global ./skill-eval-0.1.0.tgz
+npm install --global ./skill-eval-0.2.0.tgz
 skill-eval --help
 ```
 
@@ -53,12 +54,13 @@ pertencem ao tarball.
 
 ## 3. Jornada completa
 
-Os quatro comandos públicos são:
+Os cinco comandos públicos são:
 
 ```text
 skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
+skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
 skill-eval report --run <run-directory> --format json|markdown [--out <new-file>]
 ```
 
@@ -70,9 +72,11 @@ Fluxo recomendado:
 4. revise a spec canônica gerada;
 5. execute `run` em um diretório novo com autorização literal;
 6. execute `report` para obter JSON e Markdown;
-7. preserve o run e reavalie somente em outro diretório.
+7. quando precisar de evidência complementar de exposição, execute `probe-activation` em outro diretório;
+8. preserve run e probe e reavalie somente em diretórios novos.
 
-`init`, `check` e `report` são provider-free. Somente `run` pode fazer chamadas model-backed.
+`init`, `check` e `report` são provider-free. `run` e `probe-activation` podem fazer chamadas model-backed somente após suas autorizações
+literais independentes.
 
 ## 4. Preparar a skill
 
@@ -402,7 +406,70 @@ As chamadas são sequenciais, com timeout de 600 segundos, concorrência máxima
 Para cada chamada, a CLI cria um workspace temporário novo contendo apenas a target skill e a fixture permitida. Também cria um Codex home
 temporário privado com uma cópia `0600` do `auth.json` e o remove no `finally`.
 
-## 11. Artefatos do run
+## 11. Executar o probe independente de ativação
+
+Use o probe quando a pergunta específica for se conteúdo existente exclusivamente no `SKILL.md` temporário ficou exposto ao modelo e
+influenciou a resposta. Ele valida a mesma spec e os mesmos digests do pacote, mas não lê nem altera um run anterior.
+
+Bash:
+
+```bash
+SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
+  node dist/cli.js probe-activation \
+  --spec ./evaluations/my-evaluation/evaluation-spec.json \
+  --out ./probes/my-evaluation-activation-001 \
+  --approve-provider-calls 3
+```
+
+PowerShell:
+
+```powershell
+$env:SKILL_EVAL_CODEX_HOME = 'C:\path\to\authenticated-codex-home'
+node dist/cli.js probe-activation `
+  --spec ./evaluations/my-evaluation/evaluation-spec.json `
+  --out ./probes/my-evaluation-activation-001 `
+  --approve-provider-calls 3
+```
+
+Somente o texto literal `3` é aceito; `03`, `3.0`, `3e0` e `+3` falham antes da reserva. Para cada caso, a CLI:
+
+1. gera um marcador imprevisível de 128 bits diferente dos demais;
+2. confirma que o marcador não aparece no prompt nem na fixture;
+3. cria e verifica um workspace novo com a skill e fixture congeladas;
+4. acrescenta a instrução de marcador somente à cópia temporária de `SKILL.md`;
+5. registra os digests da skill base e instrumentada;
+6. envia o prompt original a Luna/max, com timeout de 600 segundos e zero retries;
+7. registra presença ou ausência do marcador e remove o workspace no `finally`.
+
+Timeout e erro de provider consomem uma tentativa, mas não impedem os casos seguintes. Falha de integridade, sanitização ou ambiente
+interrompe quando continuar deixaria de ser seguro. O teto é exatamente três tentativas Luna/max; Terra nunca é chamado.
+
+O diretório create-only contém:
+
+```text
+probes/my-evaluation-activation-001/
+  manifest.json
+  probe-results.jsonl
+  terminal.json
+  evidence/
+    final-outputs/
+    promptfoo-projections/
+```
+
+| Estado | Exit code | Interpretação limitada |
+| --- | ---: | --- |
+| `CONFIRMED` | 0 | As três respostas contêm seus marcadores, demonstrando exposição e influência do conteúdo exclusivo do `SKILL.md` temporário. |
+| `NOT_CONFIRMED` | 0 | Ao menos uma resposta concluída não contém seu marcador; isso não prova que a skill não foi usada. |
+| `INCONCLUSIVE` | 3 | Sem ausência observada em resposta aceita, timeout, provider ou ambiente impediram três confirmações. |
+
+`CONFIRMED` não demonstra telemetria de leitura no sistema operacional, leitura de referências, correção, benefício causal ou generalização.
+O probe não modifica nem é agregado automaticamente a `terminal.json`, report, claims ou recomendação do run. Teste A/B está fora do MVP.
+O owner só pode tratá-lo como evidência complementar depois de verificar independentemente mesma spec e digests, run concluído, probe
+`CONFIRMED`, claims obrigatórias não relacionadas à ativação `SUPPORTED` e ativação ausente como único motivo de `NO_DECISION`.
+Nesse cenário, qualquer aplicação única da skill original sobre uma implementação real já verde deve ocorrer em branch ou worktree separado,
+seguida por testes independentes e inspeção do diff antes de commit ou merge.
+
+## 12. Artefatos do run
 
 Um run reservado contém:
 
@@ -429,7 +496,7 @@ fora do workspace.
 
 Runs permanecem locais, são ignorados pelo Git e não têm upload ou retenção remota automática. Exclusão é uma decisão manual do owner.
 
-## 12. Gerar relatórios
+## 13. Gerar relatórios
 
 Escrever JSON em stdout:
 
@@ -456,9 +523,9 @@ O diretório pai de `--out` precisa existir e o arquivo de destino não pode exi
 Se `terminal.json` estiver ausente, `report` não retoma chamadas. Ele representa a evidência confirmada como
 `INTERRUPTED_UNCONFIRMED / NO_DECISION` e indica a última observação append-only disponível.
 
-## 13. Interpretar o resultado
+## 14. Interpretar o resultado
 
-### 13.1 Status das claims
+### 14.1 Status das claims
 
 | Status | Significado |
 | --- | --- |
@@ -466,7 +533,7 @@ Se `terminal.json` estiver ausente, `report` não retoma chamadas. Ele represent
 | `NOT_SUPPORTED` | Evidência válida contradiz ou não satisfaz o contrato. |
 | `NOT_ASSESSED` | Evidência necessária está ausente ou inválida. |
 
-### 13.2 Recomendação
+### 14.2 Recomendação
 
 | Recomendação | Ação |
 | --- | --- |
@@ -478,7 +545,7 @@ Se `terminal.json` estiver ausente, `report` não retoma chamadas. Ele represent
 Precedência: uma violação direta de segurança, não interferência ou efeito proibido com `DO_NOT_PROCEED` vence; depois vêm erros de
 instrumento, ambiente, provider, timeout ou judge inválido; depois ausência ou contradição de claims obrigatórias.
 
-### 13.3 Estados terminais
+### 14.3 Estados terminais
 
 | Estado | Leitura operacional |
 | --- | --- |
@@ -493,7 +560,7 @@ instrumento, ambiente, provider, timeout ou judge inválido; depois ausência ou
 
 Falhas de autorização e de preflight acontecem antes da reserva e não produzem um run utilizável.
 
-### 13.4 Calls, duração e custo
+### 14.4 Calls, duração e custo
 
 O relatório separa chamadas autorizadas, tentadas, concluídas, timeout e error, além de usage e duração monotônica. Ajustes materiais do relógio
 civil aparecem como limitação e não reordenam os eventos.
@@ -501,18 +568,18 @@ civil aparecem como limitação e não reordenam os eventos.
 O custo monetário real da conta ChatGPT é sempre `UNKNOWN`: a conta não fornece uma unidade monetária auditável. A estimativa
 API-equivalent usa a tabela congelada da spec somente quando input, cached input e output estão disponíveis; ela não é custo real da assinatura.
 
-## 14. Exit codes
+## 15. Exit codes
 
 | Código | Significado |
 | ---: | --- |
-| 0 | Comando produziu um artefato válido, inclusive `REVISE` ou `DO_NOT_PROCEED`. |
+| 0 | Comando produziu um artefato válido, inclusive `REVISE`, `DO_NOT_PROCEED` ou probe `NOT_CONFIRMED`. |
 | 2 | Erro de uso, spec ou preflight antes da reserva. |
-| 3 | Run reservado terminou inconclusivo. |
+| 3 | Run ou probe reservado terminou inconclusivo. |
 | 4 | Corrupção, overwrite, path inseguro ou violação de integridade. |
 
 Não interprete exit code 0 como `PROCEED`; sempre leia a recomendação do relatório.
 
-## 15. Reavaliar sem apagar evidência
+## 16. Reavaliar sem apagar evidência
 
 Crie outra avaliação ou outro run quando mudar qualquer item material:
 
@@ -523,24 +590,27 @@ Crie outra avaliação ou outro run quando mudar qualquer item material:
 - ambiente material;
 - evidência anterior incompleta, inválida ou inconclusiva.
 
-Nunca reutilize um diretório reservado e não substitua seletivamente um resultado negativo. O novo run é outra observação e não apaga o anterior.
+Nunca reutilize um diretório reservado e não substitua seletivamente um resultado negativo. Novo run ou probe é outra observação e não apaga
+o anterior.
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 | Sintoma | Causa provável | Ação segura |
 | --- | --- | --- |
 | `Refusing to reuse existing path` | Diretório ou arquivo de saída já existe. | Escolha um path novo; não apague evidência para simular retry. |
 | `Spec JSON is not canonical` | A spec foi editada manualmente ou reformatada. | Recrie o pacote com `init` a partir das respostas confirmadas. |
 | `digest does not match` | Skill snapshot ou fixture mudou depois do intake. | Crie uma nova avaliação; não repare o digest manualmente. |
-| `SKILL_EVAL_CODEX_HOME` ausente | `run` não recebeu um Codex home autenticado. | Aponte a variável para um diretório regular com `auth.json`. |
+| `SKILL_EVAL_CODEX_HOME` ausente | `run` ou `probe-activation` não recebeu um Codex home autenticado. | Aponte a variável para um diretório regular com `auth.json`. |
 | Contexto ou path proibido | Há symlink, `AGENTS.md`, `.agents`, `.git`, hardlink ou referência que escapa. | Remova o contexto concorrente da skill ou fixture de origem. |
 | `INSTRUMENT_INVALID` | Um check não pôde ler ou interpretar a evidência. | Corrija o contrato ou a fixture e crie uma nova avaliação. |
 | `JUDGE_INVALID` | Output, refs, schema ou um dos quatro probes falhou. | Preserve o run e, se necessário, crie outro com nova autorização. |
 | `NOT_ASSESSED` em ativação | Não existe telemetria direta suficiente de leitura do `SKILL.md`. | Trate como evidência ausente; a heurística positiva não substitui telemetria. |
 | Custo ChatGPT `UNKNOWN` | Comportamento esperado para autenticação ChatGPT. | Use a estimativa API-equivalent somente como referência condicionada. |
 | Run sem `terminal.json` | Processo interrompido ou confirmação final ausente. | Gere o report, preserve o run e use outro diretório para nova observação. |
+| Probe `NOT_CONFIRMED` | Uma resposta concluída não reproduziu seu marcador. | Preserve o probe; não conclua que a skill deixou de ser usada. |
+| Probe `INCONCLUSIVE` | Timeout, provider, ambiente ou sanitização impediram três confirmações. | Preserve o artefato e use outro diretório somente com nova autorização. |
 
-## 17. Limites de segurança e de conclusão
+## 18. Limites de segurança e de conclusão
 
 O isolamento de `workspace-write`, rede desabilitada, ambiente não herdado e ausência de skills globais reduz contexto concorrente. Ele não é
 uma fronteira de virtualização contra um processo malicioso executado pela mesma conta do sistema operacional.
@@ -551,4 +621,5 @@ O encerramento deste MVP significa que o mecanismo provider-free satisfaz os cri
 - garantia de que qualquer skill funciona;
 - estabilidade, robustez ou confiabilidade populacional;
 - comparação causal entre skill e baseline;
+- teste A/B ou promoção automática do probe a decisão da avaliação;
 - publicação npm, suporte multiusuário ou operação como serviço.

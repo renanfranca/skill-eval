@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { SkillEvalError, usageError } from './errors.js';
 import { initializeEvaluation, readAnswers } from './intake/init.js';
+import { runActivationProbe } from './probe/probe.js';
 import { reportRun } from './report/report.js';
 import { PromptfooCodexProvider } from './runtime/promptfoo-provider.js';
 import { runEvaluation } from './run/run.js';
@@ -15,17 +16,19 @@ Usage:
   skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
   skill-eval check --spec <evaluation-spec.json>
   skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
+  skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
   skill-eval report --run <run-directory> --format json|markdown [--out <file>]
 
 Exit codes: 0 valid artifact (including negative evidence), 2 usage/spec/preflight,
-3 reserved run inconclusive, 4 integrity/overwrite/path safety.
+3 reserved run or probe inconclusive, 4 integrity/overwrite/path safety.
 
-Provider calls occur only for run after literal authorization. init, check, and report are provider-free.`;
+Provider calls occur only for run and probe-activation after their literal authorizations. init, check, and report are provider-free.`;
 
 const COMMAND_HELP: Record<string, string> = {
   init: 'Usage: skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]\nCreates a canonical provider-free evaluation package.',
   check: 'Usage: skill-eval check --spec <evaluation-spec.json>\nValidates schema, relations, digests, paths, isolation inputs, and the exact execution condition without provider calls.',
   run: 'Usage: skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4\nRuns at most three Luna/max trials and one qualified Terra/xhigh batch, sequentially, with zero retries.',
+  'probe-activation': 'Usage: skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3\nRuns three isolated Luna/max activation probes with temporary SKILL.md markers, zero retries, and no Terra call.',
   report: 'Usage: skill-eval report --run <run-directory> --format json|markdown [--out <new-file>]\nRenders deterministic provider-free evidence, including incomplete runs as NO_DECISION.',
 };
 
@@ -70,6 +73,18 @@ export async function main(argv: string[]): Promise<number> {
         ...(process.env['SKILL_EVAL_CODEX_HOME'] === undefined ? {} : { codexHomeSource: process.env['SKILL_EVAL_CODEX_HOME'] }),
       });
       process.stdout.write(`Run ${result.terminal.status}: ${result.terminal.recommendation}\n`);
+      return result.exitCode;
+    }
+    case 'probe-activation': {
+      const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { spec: { type: 'string' }, out: { type: 'string' }, 'approve-provider-calls': { type: 'string' } } });
+      const approval = required(values['approve-provider-calls'], 'approve-provider-calls');
+      if (approval !== '3') throw usageError('probe-activation requires literal --approve-provider-calls 3 for this execution');
+      const result = await runActivationProbe({
+        specPath: required(values.spec, 'spec'), outDirectory: required(values.out, 'out'), approveProviderCalls: approval,
+        provider: new PromptfooCodexProvider(),
+        ...(process.env['SKILL_EVAL_CODEX_HOME'] === undefined ? {} : { codexHomeSource: process.env['SKILL_EVAL_CODEX_HOME'] }),
+      });
+      process.stdout.write(`Activation probe ${result.terminal.status}\n`);
       return result.exitCode;
     }
     case 'report': {

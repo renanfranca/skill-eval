@@ -1,6 +1,6 @@
 {
   "name": "skill-eval",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Provider-bounded local evaluation of a single Codex skill",
   "type": "module",
   "bin": {
@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --coverage.enabled=false --no-file-parallelism --test-timeout=0",
+    "test": "vitest run --dir test --coverage.enabled=false --no-file-parallelism --test-timeout=0",
     "prepack": "npm run build"
   },
   "dependencies": {
