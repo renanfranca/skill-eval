@@ -50,6 +50,14 @@ const directCheckSchema = {
     })),
     {
       type: 'object', additionalProperties: false,
+      required: ['id', 'claimId', 'operator', 'path', 'destinations', 'required', 'failureDecision'],
+      properties: {
+        ...checkBaseProperties, operator: { const: 'MARKDOWN_LINKS_TO' }, path: text,
+        destinations: { type: 'array', minItems: 1, uniqueItems: true, items: text },
+      },
+    },
+    {
+      type: 'object', additionalProperties: false,
       required: ['id', 'claimId', 'operator', 'paths', 'required', 'failureDecision'],
       properties: { ...checkBaseProperties, operator: { const: 'WRITES_WITHIN' }, paths: { type: 'array', minItems: 1, uniqueItems: true, items: text } },
     },

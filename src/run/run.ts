@@ -176,7 +176,7 @@ async function reserveRun(
     schemaVersion: 1,
     evaluationId: spec.evaluationId,
     createdAt: now.toISOString(),
-    cliVersion: '0.2.1',
+    cliVersion: '0.3.0',
     promptfooVersion: '0.122.0',
     codexSdkVersion: '0.147.0',
     spec,

@@ -56,6 +56,7 @@ export type DirectCheck =
       path: string;
       fragments: string[];
     })
+  | (CheckBase & { operator: 'MARKDOWN_LINKS_TO'; path: string; destinations: string[] })
   | (CheckBase & { operator: 'WRITES_WITHIN'; paths: string[] })
   | (CheckBase & { operator: 'NO_FILESYSTEM_CHANGE' })
   | (CheckBase & { operator: 'MAX_ELAPSED_MS'; maximumMs: number });

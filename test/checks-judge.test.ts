@@ -88,6 +88,106 @@ describe('direct evidence and opaque judge qualification', () => {
     expect(excludes.observation).not.toContain('allowed-beta');
   });
 
+  it('matches inline and CommonMark reference links after confined path normalization', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-markdown-links-'));
+    await mkdir(path.join(workspace, 'docs', 'guide'), { recursive: true });
+    await writeFile(path.join(workspace, 'docs', 'guide', 'README.md'), [
+      '[Getting started](<../getting%20started.md?view=compact#install> "Start here")',
+      '[Commands][commands]',
+      '[Contributing][]',
+      '[Shortcut]',
+      '[Local](./local.md#details)',
+      '[Encoded colon](name%3Apart.md)',
+      '',
+      '[commands]: <../commands.md?view=all> "Commands"',
+      '[contributing]: ../contributing.md#workflow',
+      '[shortcut]: ../shortcut.md',
+    ].join('\n'));
+
+    await expect(applyDirectCheck({
+      id: 'markdown-links', claimId: 'c', operator: 'MARKDOWN_LINKS_TO', path: 'docs/guide/README.md',
+      destinations: [
+        'docs/getting started.md', 'docs/commands.md', 'docs/contributing.md',
+        'docs/shortcut.md', 'docs/guide/local.md', 'docs/guide/name:part.md',
+      ],
+      required: true, failureDecision: 'REVISE',
+    }, { finalOutput: '', elapsedMs: 1, workspace, changes: [] })).resolves.toMatchObject({
+      status: 'APPLIED',
+      passed: true,
+      observation: 'All prespecified Markdown link destinations are present',
+    });
+  });
+
+  it('ignores non-link CommonMark content, external URLs, fragments, images, raw HTML, and escaping paths', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-markdown-ignored-'));
+    await mkdir(path.join(workspace, 'docs', 'guide'), { recursive: true });
+    await writeFile(path.join(workspace, 'docs', 'guide', 'README.md'), [
+      '![inline image](../image.png)',
+      '![reference image][image-ref]',
+      '`[inline code](../code.md)`',
+      '```md',
+      '[fenced code](../fenced.md)',
+      '```',
+      'Plain text that resembles [an unfinished link](../plain.md',
+      '<a href="../raw-html.md">raw HTML</a>',
+      '[external](https://example.com/docs.md)',
+      '[protocol relative](//example.com/docs.md)',
+      '[absolute](/rooted.md)',
+      '<https://example.com/autolink.md>',
+      '[fragment](#local-heading)',
+      '[escape](../../../outside.md)',
+      '',
+      '[image-ref]: ../reference-image.png',
+    ].join('\n'));
+
+    const result = await applyDirectCheck({
+      id: 'ignored-links', claimId: 'c', operator: 'MARKDOWN_LINKS_TO', path: 'docs/guide/README.md',
+      destinations: ['docs/wanted.md'], required: true, failureDecision: 'REVISE',
+    }, { finalOutput: '', elapsedMs: 1, workspace, changes: [] });
+    expect(result).toMatchObject({
+      status: 'APPLIED',
+      passed: false,
+      observation: 'Missing prespecified Markdown destination indexes (zero-based): 0',
+    });
+    expect(result.observation).not.toContain('docs/wanted.md');
+    expect(result.observation).not.toContain('outside.md');
+  });
+
+  it('reports only deterministic missing destination indexes and preserves file-read failure semantics', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'skill-eval-markdown-indexes-'));
+    await mkdir(path.join(workspace, 'docs', 'guide'), { recursive: true });
+    const markdownPath = path.join(workspace, 'docs', 'guide', 'README.md');
+    await writeFile(markdownPath, '[one](present-one.md)\n[three](../present-three.md)\n');
+    const check = {
+      id: 'private-destinations', claimId: 'c', operator: 'MARKDOWN_LINKS_TO' as const, path: 'docs/guide/README.md',
+      destinations: [
+        'docs/guide/present-one.md', 'private/missing-one.md', 'docs/present-three.md',
+        'private/missing-two.md', 'docs/guide/Present-One.md',
+      ],
+      required: true, failureDecision: 'REVISE' as const,
+    };
+    const context = { finalOutput: '', elapsedMs: 1, workspace, changes: [] };
+    const missing = await applyDirectCheck(check, context);
+    expect(missing).toMatchObject({
+      status: 'APPLIED', passed: false,
+      observation: 'Missing prespecified Markdown destination indexes (zero-based): 1, 3, 4',
+    });
+    expect(missing.observation).not.toContain('private/missing-one.md');
+    expect(missing.observation).not.toContain('private/missing-two.md');
+    expect(missing.observation).not.toContain('present-one.md');
+
+    const absent = await applyDirectCheck({ ...check, path: 'docs/guide/absent.md' }, context);
+    expect(absent).toMatchObject({ status: 'APPLIED', passed: false, observation: 'Prespecified Markdown file is absent or not regular' });
+    const nonRegular = await applyDirectCheck({ ...check, path: 'docs/guide' }, context);
+    expect(nonRegular).toMatchObject({ status: 'APPLIED', passed: false, observation: 'Prespecified Markdown file is absent or not regular' });
+    await writeFile(markdownPath, Uint8Array.from([0xc3, 0x28]));
+    const invalidUtf8 = await applyDirectCheck(check, context);
+    expect(invalidUtf8).toMatchObject({
+      status: 'INSTRUMENT_INVALID', passed: false,
+      observation: expect.stringMatching(/^Check could not be applied:/),
+    });
+  });
+
   it('uses opaque randomized ids and accepts only an exactly qualified batch', () => {
     const cases = directAnswers().cases.map(({ fixtureSource: _fixtureSource, ...item }) => ({ ...item, fixturePath: null }));
     cases[0]!.semanticCriteria = [{ id: 'meaning', claimId: 'behavior', statement: 'The requested meaning is present.', required: true }];

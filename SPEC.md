@@ -3,8 +3,9 @@
 | Campo | Valor |
 | --- | --- |
 | Status | MVP provider-free concluído |
-| Data | 2026-08-16 |
+| Data | 2026-08-18 |
 | Produto | CLI local, single-owner |
+| Versão | 0.3.0 |
 | Runtime | Node.js 24, npm e TypeScript estrito com ESM |
 | Objetivo | Fornecer uma skill e obter automaticamente uma avaliação útil e defensável |
 
@@ -276,6 +277,7 @@ Cada `DirectCheck` possui `id`, `claimId`, `operator`, parâmetros, `required` e
 - `PATH_EXISTS` e `PATH_ABSENT`: existência de caminho relativo regular;
 - `FILE_EQUALS`: bytes exatos ou SHA-256 esperado;
 - `FILE_CONTAINS` e `FILE_EXCLUDES`: fragmentos UTF-8 em arquivo regular;
+- `MARKDOWN_LINKS_TO`: destinos de links CommonMark presentes em um arquivo Markdown UTF-8 regular;
 - `WRITES_WITHIN`: todo caminho criado, alterado ou removido pertence à allowlist declarada;
 - `NO_FILESYSTEM_CHANGE`: snapshot final é byte-identical ao inicial;
 - `MAX_ELAPSED_MS`: duração observada não excede o limite.
@@ -286,6 +288,15 @@ podem ser vazios, absolutos, conter `..`, NUL ou resolver por symlink.
 Quando `FILE_CONTAINS` falha, a observação registra os índices zero-based dos fragments prespecificados ausentes; quando `FILE_EXCLUDES`
 falha, registra os índices zero-based dos fragments proibidos presentes. Os índices seguem a ordem congelada na spec, em ordem crescente, e
 os diagnostics não repetem os valores dos fragments nem o conteúdo final do arquivo.
+
+`MARKDOWN_LINKS_TO` recebe `path` e um array não vazio e sem duplicatas `destinations`. Todos são paths POSIX confinados e normalizados. O
+arquivo indicado por `path` é analisado como CommonMark com `mdast-util-from-markdown@2.0.3`. Links inline e links por referência completos,
+colapsados ou abreviados contam; títulos, destinos entre `<…>`, prefixo `./`, paths relativos ao diretório do Markdown, percent-encoding,
+query e fragmento são aceitos. A comparação usa somente o path-base decodificado, normalizado em relação à raiz do workspace e
+case-sensitive. Imagens, texto simples, código, HTML bruto, URLs externas, links somente para fragmentos e destinos que escapem do
+workspace são ignorados. O check não acessa rede nem abre os destinos; `PATH_EXISTS` continua responsável por validar existência. Em falha,
+a observação registra somente os índices zero-based dos destinos prespecificados ausentes, em ordem crescente, sem repetir valores
+esperados, links observados ou conteúdo do arquivo.
 
 ### 5.2 Critérios semânticos
 

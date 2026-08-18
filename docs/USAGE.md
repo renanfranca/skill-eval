@@ -45,7 +45,7 @@ Gerar e instalar um tarball são ações locais; publicação no npm não faz pa
 npm ci
 npm run build
 npm pack
-npm install --global ./skill-eval-0.2.1.tgz
+npm install --global ./skill-eval-0.3.0.tgz
 skill-eval --help
 ```
 
@@ -310,6 +310,7 @@ Todo check possui `id`, `claimId`, `operator`, `required` e `failureDecision`, a
 | `FILE_EQUALS` | `path`, `expected` | Os bytes são iguais ao texto esperado ou ao objeto `{ "sha256": "sha256:..." }`. |
 | `FILE_CONTAINS` | `path`, `fragments` | O arquivo UTF-8 contém todos os fragmentos. |
 | `FILE_EXCLUDES` | `path`, `fragments` | O arquivo UTF-8 não contém nenhum fragmento. |
+| `MARKDOWN_LINKS_TO` | `path`, `destinations` | O arquivo Markdown contém links CommonMark para todos os destinos. |
 | `WRITES_WITHIN` | `paths` | Todo path criado, alterado ou removido pertence à allowlist ou é descendente dela. |
 | `NO_FILESYSTEM_CHANGE` | nenhum | O workspace final é byte-identical ao snapshot inicial. |
 | `MAX_ELAPSED_MS` | `maximumMs` | A duração monotônica observada não excede o limite. |
@@ -320,6 +321,31 @@ aceitam código, shell, imports, callbacks, rede ou regex fornecidos pelo usuár
 Em uma falha de `FILE_CONTAINS`, a observação lista os índices zero-based dos fragments ausentes; em uma falha de `FILE_EXCLUDES`, lista os
 índices zero-based dos fragments proibidos presentes. Os índices são crescentes e referenciam a ordem de `fragments` congelada na spec. O
 diagnóstico não repete os valores dos fragments nem o conteúdo final do arquivo.
+
+`MARKDOWN_LINKS_TO` valida navegação declarada sem abrir os destinos. Exemplo:
+
+```json
+{
+  "id": "readme-navigation",
+  "claimId": "behavior",
+  "operator": "MARKDOWN_LINKS_TO",
+  "path": "README.md",
+  "destinations": [
+    "docs/getting-started.md",
+    "docs/commands.md",
+    "docs/contributing.md"
+  ],
+  "required": true,
+  "failureDecision": "REVISE"
+}
+```
+
+O parser CommonMark reconhece links inline e referências completas, colapsadas e abreviadas. Títulos, destinos entre `<…>`, prefixo `./`,
+paths relativos ao diretório do Markdown, percent-encoding, query e fragmento são aceitos; a comparação é case-sensitive e considera somente
+o path-base normalizado em relação à raiz do workspace. Imagens, código, HTML bruto, URLs externas, links somente para fragmentos e destinos
+que escapem do workspace são ignorados. Use checks `PATH_EXISTS` separados quando a existência dos arquivos também fizer parte do contrato.
+Uma falha de navegação registra somente os índices zero-based dos destinos ausentes, sem repetir destinos esperados, links observados ou o
+conteúdo do Markdown.
 
 Use checks diretos sempre que a propriedade for resolvível mecanicamente. Reserve critérios semânticos para significado, fidelidade ou
 outcome que não possam ser determinados por igualdade, conteúdo, schema, filesystem ou duração.

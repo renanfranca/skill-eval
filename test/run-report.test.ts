@@ -42,7 +42,7 @@ describe('provider-bounded run and deterministic report', () => {
     expect(provider.requests.map((request) => request.model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
     await expect(access(path.join(run, 'judge-batch.json'))).rejects.toThrow();
     await expect(readFile(path.join(run, 'manifest.json'), 'utf8').then((bytes) => JSON.parse(bytes) as unknown)).resolves.toMatchObject({
-      cliVersion: '0.2.1',
+      cliVersion: '0.3.0',
     });
     const report = await buildReport(run);
     expect(report.directObservations).toHaveLength(3);
@@ -51,6 +51,50 @@ describe('provider-bounded run and deterministic report', () => {
     expect(markdown).toContain('Actual ChatGPT cost: **UNKNOWN**');
     expect(markdown).toContain(canonicalJson(report));
     expect(await reportRun({ runDirectory: run, format: 'json' })).toContain('"recommendation": "PROCEED"');
+  });
+
+  it('executes and reports MARKDOWN_LINKS_TO without opening or requiring the linked destination', async () => {
+    const fixture = await makePackage();
+    const fixtureSource = path.join(fixture.root, 'markdown-fixture');
+    await mkdir(fixtureSource);
+    await writeFile(path.join(fixtureSource, 'README.md'), '[Guide](docs/guide.md?view=compact#start)\n');
+    const answers = directAnswers();
+    answers.cases[0].fixtureSource = fixtureSource;
+    answers.cases[0].checks = [{
+      id: 'readme-navigation', claimId: 'behavior', operator: 'MARKDOWN_LINKS_TO', path: 'README.md',
+      destinations: ['docs/guide.md'], required: true, failureDecision: 'REVISE',
+    }];
+    const evaluation = path.join(fixture.root, 'evaluation-markdown-links');
+    await initializeEvaluation({
+      skillDirectory: fixture.skill,
+      outDirectory: evaluation,
+      answers,
+      now: () => FIXED_DATE,
+    });
+    const run = path.join(fixture.root, 'run-markdown-links');
+    const result = await runEvaluation({
+      specPath: path.join(evaluation, 'evaluation-spec.json'),
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider(completions()),
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      terminal: {
+        status: 'COMPLETED', recommendation: 'PROCEED',
+        directObservations: expect.arrayContaining([
+          expect.objectContaining({ operator: 'MARKDOWN_LINKS_TO', passed: true }),
+        ]),
+      },
+    });
+    await expect(access(path.join(evaluation, 'fixtures', 'positive', 'docs', 'guide.md'))).rejects.toThrow();
+    await expect(buildReport(run)).resolves.toMatchObject({
+      decision: { recommendation: 'PROCEED' },
+      directObservations: expect.arrayContaining([
+        expect.objectContaining({ operator: 'MARKDOWN_LINKS_TO', passed: true }),
+      ]),
+    });
   });
 
   it.each(['04', '4.0', '4e0', '+4'])('rejects numerically equivalent authorization %s before reservation or any provider call', async (approval) => {

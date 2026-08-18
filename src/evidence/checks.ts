@@ -1,6 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import Ajv from 'ajv/dist/ajv.js';
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import { messageOf } from '../errors.js';
 import { redactSecrets, sha256Bytes } from '../spec/canonical.js';
 import type { DirectCheck } from '../spec/types.js';
@@ -30,6 +31,13 @@ interface SnapshotNode {
   kind: 'directory' | 'file';
   mode: number;
   sha256?: string;
+}
+
+interface MarkdownNode {
+  type: string;
+  children?: MarkdownNode[];
+  identifier?: string;
+  url?: string;
 }
 
 function treeMap(tree: ScannedTree): Map<string, SnapshotNode> {
@@ -96,6 +104,53 @@ async function utf8File(filePath: string): Promise<string> {
 
 function withinAllowlist(itemPath: string, allowlist: string[]): boolean {
   return allowlist.some((allowed) => itemPath === allowed || itemPath.startsWith(`${allowed}/`));
+}
+
+function walkMarkdown(node: MarkdownNode, visit: (item: MarkdownNode) => void): void {
+  visit(node);
+  node.children?.forEach((child) => walkMarkdown(child, visit));
+}
+
+function normalizedMarkdownLinkPath(rawUrl: string, sourcePath: string): string | undefined {
+  const suffixIndex = rawUrl.search(/[?#]/u);
+  const base = suffixIndex === -1 ? rawUrl : rawUrl.slice(0, suffixIndex);
+  if (base === '' || base.startsWith('//') || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(base)) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(base);
+  } catch {
+    return undefined;
+  }
+  if (
+    decoded === '' || decoded.includes('\0') || decoded.includes('\\') || decoded.startsWith('//') ||
+    path.posix.isAbsolute(decoded)
+  ) return undefined;
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), decoded));
+  if (resolved === '.' || resolved === '..' || resolved.startsWith('../') || path.posix.isAbsolute(resolved)) return undefined;
+  return resolved;
+}
+
+function markdownLinkDestinations(content: string, sourcePath: string): Set<string> {
+  const root = fromMarkdown(content) as unknown as MarkdownNode;
+  const definitions = new Map<string, string>();
+  walkMarkdown(root, (node) => {
+    if (
+      node.type === 'definition' && node.identifier !== undefined && node.url !== undefined &&
+      !definitions.has(node.identifier)
+    ) definitions.set(node.identifier, node.url);
+  });
+  const destinations = new Set<string>();
+  walkMarkdown(root, (node) => {
+    const rawUrl = node.type === 'link'
+      ? node.url
+      : node.type === 'linkReference' && node.identifier !== undefined
+        ? definitions.get(node.identifier)
+        : undefined;
+    if (rawUrl === undefined) return;
+    const normalized = normalizedMarkdownLinkPath(rawUrl, sourcePath);
+    if (normalized !== undefined) destinations.add(normalized);
+  });
+  return destinations;
 }
 
 export async function applyDirectCheck(
@@ -181,6 +236,20 @@ export async function applyDirectCheck(
           : check.operator === 'FILE_CONTAINS'
             ? `Missing prespecified file fragment indexes (zero-based): ${relevantIndexes.join(', ')}`
             : `Present prohibited file fragment indexes (zero-based): ${relevantIndexes.join(', ')}`;
+        break;
+      }
+      case 'MARKDOWN_LINKS_TO': {
+        const target = workspacePath(context.workspace, check.path);
+        if (!(await regularFile(target))) {
+          observation = 'Prespecified Markdown file is absent or not regular';
+          break;
+        }
+        const observed = markdownLinkDestinations(await utf8File(target), check.path);
+        const missingIndexes = check.destinations.flatMap((destination, index) => observed.has(destination) ? [] : [index]);
+        passed = missingIndexes.length === 0;
+        observation = passed
+          ? 'All prespecified Markdown link destinations are present'
+          : `Missing prespecified Markdown destination indexes (zero-based): ${missingIndexes.join(', ')}`;
         break;
       }
       case 'WRITES_WITHIN': {

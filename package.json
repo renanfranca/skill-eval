@@ -1,6 +1,6 @@
 {
   "name": "skill-eval",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Provider-bounded local evaluation of a single Codex skill",
   "type": "module",
   "bin": {
@@ -27,6 +27,7 @@
     "@inquirer/prompts": "7.8.4",
     "@openai/codex-sdk": "0.147.0",
     "ajv": "8.20.0",
+    "mdast-util-from-markdown": "2.0.3",
     "promptfoo": "0.122.0"
   },
   "devDependencies": {

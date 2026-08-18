@@ -80,6 +80,9 @@ function validateRelations(value: EvaluationSpec | InitAnswers, checkFixturePath
       nestedIds.push(check.id);
       if (!item.claimIds.includes(check.claimId)) throw usageError(`Check ${check.id} references claim outside case ${item.id}`);
       if ('path' in check) assertSafeRelativePath(check.path, `Check ${check.id} path`);
+      if (check.operator === 'MARKDOWN_LINKS_TO') {
+        check.destinations.forEach((entry) => assertSafeRelativePath(entry, `Check ${check.id} destination`));
+      }
       if ('paths' in check) check.paths.forEach((entry) => assertSafeRelativePath(entry, `Check ${check.id} allowlist path`));
       if (check.operator === 'FINAL_JSON_SCHEMA') {
         assertNoRemoteRefs(check.schema, `Check ${check.id}`);

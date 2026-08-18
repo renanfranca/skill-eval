@@ -70,6 +70,39 @@ describe('specification and confined intake', () => {
     expect(() => validateAnswers(remote)).toThrow(/non-local/i);
   });
 
+  it('accepts MARKDOWN_LINKS_TO and rejects empty, duplicate, or unsafe source and destination paths', () => {
+    const accepted = directAnswers();
+    accepted.cases[0].checks = [{
+      id: 'markdown-navigation', claimId: 'behavior', operator: 'MARKDOWN_LINKS_TO', path: 'README.md',
+      destinations: ['docs/getting-started.md', 'docs/commands.md'], required: true, failureDecision: 'REVISE',
+    }];
+    expect(validateAnswers(accepted).cases[0].checks[0]).toMatchObject({ operator: 'MARKDOWN_LINKS_TO' });
+
+    for (const destinations of [
+      [],
+      ['docs/same.md', 'docs/same.md'],
+      ['/absolute.md'],
+      ['docs/./not-normalized.md'],
+      ['../outside.md'],
+      ['docs\\windows.md'],
+      ['docs/\0nul.md'],
+    ]) {
+      const invalid = structuredClone(accepted);
+      const invalidCheck = invalid.cases[0].checks[0]!;
+      if (invalidCheck.operator !== 'MARKDOWN_LINKS_TO') throw new Error('Expected MARKDOWN_LINKS_TO check');
+      invalidCheck.destinations = destinations;
+      expect(() => validateAnswers(invalid)).toThrow(/invalid answers|unique|confined normalized POSIX path/i);
+    }
+
+    for (const sourcePath of ['', '/README.md', 'docs/./README.md', '../README.md', 'docs\\README.md', 'docs/\0README.md']) {
+      const invalid = structuredClone(accepted);
+      const invalidCheck = invalid.cases[0].checks[0]!;
+      if (invalidCheck.operator !== 'MARKDOWN_LINKS_TO') throw new Error('Expected MARKDOWN_LINKS_TO check');
+      invalidCheck.path = sourcePath;
+      expect(() => validateAnswers(invalid)).toThrow(/invalid answers|confined normalized POSIX path/i);
+    }
+  });
+
   it('rejects symlinks, forbidden contexts, and escaping Markdown references', async () => {
     const fixture = await makePackage();
     await symlink(path.join(fixture.skill, 'SKILL.md'), path.join(fixture.skill, 'link.md'));
