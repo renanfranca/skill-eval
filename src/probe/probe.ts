@@ -12,6 +12,7 @@ import { canonicalJson, redactSecrets, sha256Bytes } from '../spec/canonical.js'
 import { FIXTURE_DIRECTORY, type EvaluationCase, type EvaluationSpec } from '../spec/types.js';
 import { checkEvaluationPackage } from '../spec/validate.js';
 import type { ActivationProbeRecord, ActivationProbeStatus, ActivationProbeTerminal } from './types.js';
+import { CLI_VERSION } from '../version.js';
 
 export interface ActivationProbeOptions {
   specPath: string;
@@ -37,7 +38,6 @@ interface ProviderAccountingRecord {
   usage?: TokenUsage;
 }
 
-const CLI_VERSION = '0.3.0';
 const CLOCK_SKEW_LIMIT_MS = 1_000;
 const PROBE_MARKER = /^🔧\[skill-eval:[a-f0-9]{32}\]$/;
 const LIMITATIONS = [

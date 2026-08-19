@@ -15,6 +15,7 @@ import { assertPathHasNoSymlinkComponents } from '../intake/tree.js';
 import { FIXTURE_DIRECTORY, type EvaluationCase, type EvaluationSpec } from '../spec/types.js';
 import { assessClaims, recommend, suggestedAction } from './decision.js';
 import type { CaseRecord, TerminalReceipt, TerminalStatus } from './types.js';
+import { CLI_VERSION } from '../version.js';
 
 export interface RunOptions {
   specPath: string;
@@ -176,7 +177,7 @@ async function reserveRun(
     schemaVersion: 1,
     evaluationId: spec.evaluationId,
     createdAt: now.toISOString(),
-    cliVersion: '0.3.0',
+    cliVersion: CLI_VERSION,
     promptfooVersion: '0.122.0',
     codexSdkVersion: '0.147.0',
     spec,

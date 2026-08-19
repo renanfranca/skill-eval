@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { SkillEvalError, usageError } from './errors.js';
+import { installCompanion } from './install/companion.js';
 import { initializeEvaluation, readAnswers } from './intake/init.js';
 import { runActivationProbe } from './probe/probe.js';
 import { reportRun } from './report/report.js';
@@ -13,6 +14,7 @@ import { checkEvaluationPackage } from './spec/validate.js';
 const GENERAL_HELP = `skill-eval — bounded local evaluation of one Codex skill
 
 Usage:
+  skill-eval install --skills
   skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
   skill-eval check --spec <evaluation-spec.json>
   skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
@@ -22,9 +24,10 @@ Usage:
 Exit codes: 0 valid artifact (including negative evidence), 2 usage/spec/preflight,
 3 reserved run or probe inconclusive, 4 integrity/overwrite/path safety.
 
-Provider calls occur only for run and probe-activation after their literal authorizations. init, check, and report are provider-free.`;
+Provider calls occur only for run and probe-activation after their literal authorizations. install, init, check, and report are provider-free.`;
 
 const COMMAND_HELP: Record<string, string> = {
+  install: 'Usage: skill-eval install --skills\nInstalls the packaged companion provider-free at .agents/skills/skill-eval in the current project. Existing identical content is a no-op; divergent content is never overwritten.',
   init: 'Usage: skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]\nCreates a canonical provider-free evaluation package.',
   check: 'Usage: skill-eval check --spec <evaluation-spec.json>\nValidates schema, relations, digests, paths, isolation inputs, and the exact execution condition without provider calls.',
   run: 'Usage: skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4\nRuns at most three Luna/max trials and one qualified Terra/xhigh batch, sequentially, with zero retries.',
@@ -50,6 +53,15 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
   switch (command) {
+    case 'install': {
+      if (rest.length !== 1 || rest[0] !== '--skills') {
+        throw usageError('install accepts exactly the boolean flag --skills');
+      }
+      const result = await installCompanion();
+      const action = result.status === 'INSTALLED' ? 'Installed' : 'Companion already identical at';
+      process.stdout.write(`${action} ${result.destination}\nStart a new Codex task if companion discovery is not refreshed; installation does not activate it in the current task.\n`);
+      return 0;
+    }
     case 'init': {
       const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { skill: { type: 'string' }, out: { type: 'string' }, answers: { type: 'string' } } });
       const answers = values.answers === undefined ? undefined : await readAnswers(values.answers);

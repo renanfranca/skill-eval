@@ -78,7 +78,7 @@ describe('experimental skill-eval companion', () => {
     expect(contents).not.toMatch(/explicit[-_ ]only|installer|restructure-documentation|seed4j|v1-v6/iu);
   });
 
-  it('stays outside the npm tarball', async () => {
+  it('is included in the npm tarball with exactly its required files', async () => {
     const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     const { stdout } = await execFileAsync(npm, ['pack', '--dry-run', '--json', '--ignore-scripts'], {
       cwd: repositoryRoot,
@@ -86,7 +86,10 @@ describe('experimental skill-eval companion', () => {
     });
     const result = JSON.parse(stdout) as Array<{ files?: Array<{ path?: string }> }>;
     const packagedPaths = result.flatMap((item) => item.files ?? []).flatMap((item) => item.path ?? []);
-    expect(packagedPaths).not.toContain('skills/skill-eval/SKILL.md');
-    expect(packagedPaths.some((item) => item.startsWith('skills/skill-eval/'))).toBe(false);
+    expect(packagedPaths.filter((item) => item.startsWith('skills/skill-eval/')).sort()).toEqual([
+      'skills/skill-eval/SKILL.md',
+      'skills/skill-eval/references/execution-and-interpretation.md',
+      'skills/skill-eval/references/instrument-design.md',
+    ]);
   });
 });

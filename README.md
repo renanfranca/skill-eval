@@ -26,6 +26,7 @@ As versões do Promptfoo (`0.122.0`) e do Codex SDK (`0.147.0`) estão fixadas n
 ## Comandos
 
 ```text
+skill-eval install --skills
 skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
@@ -33,9 +34,26 @@ skill-eval probe-activation --spec <evaluation-spec.json> --out <new-probe-direc
 skill-eval report --run <run-directory> --format json|markdown [--out <new-file>]
 ```
 
-Cada comando e subcomando possui `--help`. `init`, `check` e `report` são sempre provider-free. `run` aceita somente a autorização literal `4`;
+Cada comando e subcomando possui `--help`. `install`, `init`, `check` e `report` são sempre provider-free. `run` aceita somente a autorização literal `4`;
 `probe-activation`, somente `3`. Ambos exigem um diretório inexistente e não reutilizam autorização nem artefato anterior. O output do probe
 também precisa ficar fora do pacote de avaliação congelado.
+
+### Companion conversacional opcional
+
+O pacote inclui um companion conversacional que ajuda a revisar a coerência do instrumento e a operar a jornada documentada. Ele não
+substitui os comandos da CLI, não inventa decisões do owner e não autoriza providers. Para disponibilizá-lo explicitamente no projeto atual:
+
+```text
+skill-eval install --skills
+```
+
+O único destino é `.agents/skills/skill-eval` relativo ao diretório corrente. Uma instalação nova copia exatamente o companion empacotado;
+uma árvore já idêntica é no-op; qualquer diferença, arquivo extra ou tipo inseguro é recusado sem alteração. Não existe path configurável,
+`--force`, instalação global, overwrite, `postinstall`, provider ou ativação automática. A descoberta do companion pode exigir uma nova task
+do Codex, e a instalação não comprova ativação na task atual.
+
+O fluxo assistido é `companion → confirmação explícita do owner → init → check`. Usar `init` e `check` diretamente, sem instalar ou usar o
+companion, continua sendo uma alternativa completa e válida.
 
 ### Intake não interativo
 

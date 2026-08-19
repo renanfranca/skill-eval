@@ -37,7 +37,7 @@ node dist/cli.js --help
 Os exemplos deste guia usam `node dist/cli.js`. Se o pacote já estiver instalado e seu binário estiver no `PATH`, substitua essa expressão
 por `skill-eval`.
 
-### 2.2 Instalação a partir de um tarball local
+### 2.2 Instalação da CLI a partir de um tarball local
 
 Gerar e instalar um tarball são ações locais; publicação no npm não faz parte do MVP.
 
@@ -45,18 +45,37 @@ Gerar e instalar um tarball são ações locais; publicação no npm não faz pa
 npm ci
 npm run build
 npm pack
-npm install --global ./skill-eval-0.3.0.tgz
-skill-eval --help
+npm install --save-dev ./skill-eval-0.4.0.tgz
+npx skill-eval --help
 ```
 
-O pacote distribuído inclui `README.md`, `SPEC.md`, este guia, `LICENSE` e o JavaScript compilado. Inputs de avaliação, runs e credenciais não
-pertencem ao tarball.
+O pacote distribuído inclui `README.md`, `SPEC.md`, este guia, `LICENSE`, o JavaScript compilado e o companion em `skills/skill-eval`. Inputs
+de avaliação, runs e credenciais não pertencem ao tarball.
+
+### 2.3 Companion conversacional local e opcional
+
+O companion ajuda uma conversa Codex a revisar o desenho do instrumento e operar o fluxo documentado. A CLI continua responsável por criar,
+validar, executar e reportar os artefatos; instalar o companion não executa esses comandos nem concede autorização de provider.
+
+No projeto em que o companion deve ficar disponível para descoberta futura, execute explicitamente:
+
+```bash
+node dist/cli.js install --skills
+```
+
+O destino é sempre `.agents/skills/skill-eval` sob o diretório corrente. Não há argumento de path, instalação global, `--force`, overwrite,
+`postinstall`, provider ou efeito implícito de `init`. A primeira instalação copia exatamente a árvore empacotada. Repetir sobre uma árvore
+idêntica retorna sucesso sem alterar timestamps; uma instalação divergente ou insegura é recusada integralmente.
+
+Talvez seja necessário iniciar uma nova task do Codex para atualizar a descoberta. A instalação não promete leitura ou ativação na task
+corrente. Quem não quiser o companion pode usar todos os comandos da CLI diretamente; esse caminho permanece completo e suportado.
 
 ## 3. Jornada completa
 
-Os cinco comandos públicos são:
+Os seis comandos públicos são:
 
 ```text
+skill-eval install --skills
 skill-eval init --skill <directory> --out <new-directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
@@ -66,16 +85,18 @@ skill-eval report --run <run-directory> --format json|markdown [--out <new-file>
 
 Fluxo recomendado:
 
-1. prepare a skill, fixtures e respostas;
-2. execute `init` para criar um snapshot imutável por digest;
-3. execute `check` e corrija qualquer erro antes de autorizar providers;
-4. revise a spec canônica gerada;
-5. execute `run` em um diretório novo com autorização literal;
-6. execute `report` para obter JSON e Markdown;
-7. quando precisar de evidência complementar de exposição, execute `probe-activation` em outro diretório;
-8. preserve run e probe e reavalie somente em diretórios novos.
+1. opcionalmente, execute `install --skills` e inicie uma nova task para usar o companion;
+2. com ou sem companion, prepare a skill, fixtures e respostas;
+3. confirme explicitamente as decisões do owner; o companion não preenche lacunas;
+4. execute `init` para criar um snapshot imutável por digest;
+5. execute `check` e corrija qualquer erro antes de autorizar providers;
+6. revise a spec canônica gerada;
+7. execute `run` em um diretório novo com autorização literal;
+8. execute `report` para obter JSON e Markdown;
+9. quando precisar de evidência complementar de exposição, execute `probe-activation` em outro diretório;
+10. preserve run e probe e reavalie somente em diretórios novos.
 
-`init`, `check` e `report` são provider-free. `run` e `probe-activation` podem fazer chamadas model-backed somente após suas autorizações
+`install`, `init`, `check` e `report` são provider-free. `run` e `probe-activation` podem fazer chamadas model-backed somente após suas autorizações
 literais independentes.
 
 ## 4. Preparar a skill
@@ -646,6 +667,7 @@ o anterior.
 | Sintoma | Causa provável | Ação segura |
 | --- | --- | --- |
 | `Refusing to reuse existing path` | Diretório ou arquivo de saída já existe. | Escolha um path novo; não apague evidência para simular retry. |
+| Instalação do companion recusada | `.agents/skills/skill-eval` diverge da cópia empacotada ou contém tipo inseguro. | Preserve a instalação existente; compare-a manualmente. Não use overwrite ou `--force`. |
 | `Spec JSON is not canonical` | A spec foi editada manualmente ou reformatada. | Recrie o pacote com `init` a partir das respostas confirmadas. |
 | `digest does not match` | Skill snapshot ou fixture mudou depois do intake. | Crie uma nova avaliação; não repare o digest manualmente. |
 | `SKILL_EVAL_CODEX_HOME` ausente | `run` ou `probe-activation` não recebeu um Codex home autenticado. | Aponte a variável para um diretório regular com `auth.json`. |
@@ -671,3 +693,4 @@ O encerramento deste MVP significa que o mecanismo provider-free satisfaz os cri
 - comparação causal entre skill e baseline;
 - teste A/B ou promoção automática do probe a decisão da avaliação;
 - publicação npm, suporte multiusuário ou operação como serviço.
+- instalação global, atualização automática, overwrite ou ativação automática do companion.

@@ -42,7 +42,7 @@ describe('provider-bounded run and deterministic report', () => {
     expect(provider.requests.map((request) => request.model)).toEqual(['gpt-5.6-luna', 'gpt-5.6-luna', 'gpt-5.6-luna']);
     await expect(access(path.join(run, 'judge-batch.json'))).rejects.toThrow();
     await expect(readFile(path.join(run, 'manifest.json'), 'utf8').then((bytes) => JSON.parse(bytes) as unknown)).resolves.toMatchObject({
-      cliVersion: '0.3.0',
+      cliVersion: '0.4.0',
     });
     const report = await buildReport(run);
     expect(report.directObservations).toHaveLength(3);

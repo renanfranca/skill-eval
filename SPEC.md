@@ -3,9 +3,9 @@
 | Campo | Valor |
 | --- | --- |
 | Status | MVP provider-free concluído |
-| Data | 2026-08-18 |
+| Data | 2026-08-19 |
 | Produto | CLI local, single-owner |
-| Versão | 0.3.0 |
+| Versão | 0.4.0 |
 | Runtime | Node.js 24, npm e TypeScript estrito com ESM |
 | Objetivo | Fornecer uma skill e obter automaticamente uma avaliação útil e defensável |
 
@@ -76,6 +76,7 @@ Uma avaliação é defensável quando:
 ### 3.1 Incluído
 
 - CLI local em Node.js e TypeScript.
+- Instalação local, explícita e provider-free do companion empacotado em `.agents/skills/skill-eval`.
 - Skill Codex representada por um diretório com `SKILL.md` e arquivos locais.
 - Questionário guiado e alternativa não interativa equivalente.
 - Especificação JSON canônica, sem YAML.
@@ -100,12 +101,14 @@ Uma avaliação é defensável quando:
 - JavaScript arbitrário, shell ou plugins de oracle fornecidos pelo usuário.
 - Execução model-backed em CI, exemplos, instalação, build ou implementação.
 - Compatibilidade com schemas de outros projetos.
+- Instalação global, atualização automática, overwrite, `--force`, `postinstall` ou ativação automática do companion.
 - Contenção contra um adversário local que já controle a mesma conta do sistema operacional. O MVP garante isolamento de contexto e de
   descoberta do Codex, não uma fronteira de virtualização do host.
 
 ## 4. Jornada e comandos públicos
 
 ```text
+skill-eval install --skills
 skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
 skill-eval check --spec <evaluation-spec.json>
 skill-eval run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
@@ -115,7 +118,29 @@ skill-eval report --run <run-directory> --format json|markdown [--out <file>]
 
 Não há API pública de biblioteca no MVP.
 
-### 4.1 `init`
+### 4.1 `install`
+
+`install` é provider-free e aceita exatamente a flag booleana `--skills`, sem argumentos posicionais, paths fornecidos pelo usuário, outras
+flags, `--force` ou escopo global. Ele resolve a origem exclusivamente como `skills/skill-eval` dentro da raiz instalada do próprio pacote,
+ao lado da distribuição compilada, e o destino exclusivamente como `.agents/skills/skill-eval` no diretório de trabalho atual. Não acessa
+autenticação, não reserva pacote, run ou probe e não é executado implicitamente por `init` ou por `postinstall`.
+
+O companion distribuído contém somente `SKILL.md`, `references/execution-and-interpretation.md` e
+`references/instrument-design.md`. A origem precisa ser uma árvore regular e confinada, sem symlinks, hardlinks, arquivos especiais,
+colisões case-insensitive ou mudanças durante a leitura. Componentes já existentes do caminho `.agents/skills` precisam ser diretórios
+regulares e não podem atravessar symlinks.
+
+Quando o destino não existe, o comando copia a árvore para um staging privado no mesmo filesystem, preserva bytes e modos, confirma a
+identidade completa e promove o staging atomicamente para `.agents/skills/skill-eval`. Uma falha remove somente o staging criado pela
+operação e preserva todo conteúdo preexistente. Quando o destino existe, a árvore canônica completa — paths, bytes e modos — precisa ser
+idêntica à origem para produzir um no-op de sucesso; qualquer diferença, arquivo extra ou tipo inseguro é recusado sem mutação. O comando
+nunca mescla, substitui, atualiza, renomeia ou apaga uma instalação divergente.
+
+Instalação nova ou no-op idêntico usa exit code 0 e informa o path instalado, explicando que a descoberta pode exigir uma nova task do Codex
+e não implica ativação na task atual. Erro de uso usa exit code 2. Origem ou destino inseguro, divergência, overwrite tentado ou falha de
+promoção usa exit code 4 e não deixa instalação parcial.
+
+### 4.2 `init`
 
 `init` é provider-free. Ele valida e copia a skill, coleta respostas, mostra um resumo para confirmação e cria um diretório novo:
 
@@ -142,7 +167,7 @@ O questionário solicita somente:
 
 Se qualquer informação obrigatória estiver ausente, `init` não cria uma especificação parcial.
 
-### 4.2 `check`
+### 4.3 `check`
 
 `check` é provider-free e não escreve no pacote. Ele valida:
 
@@ -158,7 +183,7 @@ Se qualquer informação obrigatória estiver ausente, `init` não cria uma espe
 
 Uma spec inválida nunca chega ao provider.
 
-### 4.3 `run`
+### 4.4 `run`
 
 `run` executa preflight provider-free, exige um diretório de saída inexistente e requer exatamente
 `--approve-provider-calls 4`. Qualquer outro valor é rejeitado. A autorização não pode vir da spec, de execução anterior, de variável persistida
@@ -167,12 +192,12 @@ ou de output do modelo.
 Depois do preflight, o comando reserva atomicamente o diretório, grava manifest e ledger iniciais e executa o pipeline da seção 8. O processo
 é sequencial. O teto de quatro chamadas inclui chamadas tentadas que terminem em timeout ou erro.
 
-### 4.4 `report`
+### 4.5 `report`
 
 `report` é provider-free e determinístico. Ele lê um run existente e escreve JSON ou Markdown. Sem `--out`, escreve em stdout. Com `--out`,
 exige que o arquivo ainda não exista. Um run incompleto produz `NO_DECISION` e descreve a última evidência confirmada; nunca tenta retomá-lo.
 
-### 4.5 `probe-activation`
+### 4.6 `probe-activation`
 
 `probe-activation` é uma execução independente que valida o pacote congelado, exige um diretório de saída inexistente e requer exatamente
 `--approve-provider-calls 3`. O diretório de saída resolvido não pode ser igual nem descendente do diretório do pacote de avaliação; essa
@@ -183,7 +208,7 @@ O probe reutiliza os três casos, prompts e fixtures da spec sem modificar o pac
 de 128 bits, instrumenta somente a cópia temporária de `SKILL.md` dentro de um workspace novo e executa uma chamada Luna/max. Nunca chama
 Terra, não altera runs anteriores e não participa de `report` nem da recomendação da avaliação original.
 
-### 4.6 Exit codes
+### 4.7 Exit codes
 
 | Código | Significado |
 | ---: | --- |
@@ -726,21 +751,35 @@ ser implementada antecipadamente por `/goal`.
 
 Separar responsabilidades sem criar framework extensível:
 
-1. `spec`: tipos, validação fechada e serialização canônica;
-2. `intake`: snapshot confinado e questionário;
-3. `runtime`: porta de provider, adapter Promptfoo e fake determinístico;
-4. `evidence`: checks diretos, projeção sanitizada, ledger e persistência create-only;
-5. `judge`: composição opaca, schema e qualificação dos probes;
-6. `probe`: instrumentação temporária e classificação independente de ativação;
-7. `report`: assessment e renderização determinística;
-8. `cli`: parsing de argumentos, exit codes e composição.
+1. `install`: validação, staging e promoção create-only do companion empacotado;
+2. `spec`: tipos, validação fechada e serialização canônica;
+3. `intake`: snapshot confinado e questionário;
+4. `runtime`: porta de provider, adapter Promptfoo e fake determinístico;
+5. `evidence`: checks diretos, projeção sanitizada, ledger e persistência create-only;
+6. `judge`: composição opaca, schema e qualificação dos probes;
+7. `probe`: instrumentação temporária e classificação independente de ativação;
+8. `report`: assessment e renderização determinística;
+9. `cli`: parsing de argumentos, exit codes e composição.
 
 Usar `node:util.parseArgs` para o CLI, uma biblioteca de prompts interativos, validação runtime declarativa e Vitest. Dependências são salvas
 com versões exatas e lockfile. Não criar container de injeção, plugin system, banco de dados ou abstração para múltiplos engines.
 
 ## 15. Testes provider-free
 
-### 15.1 Spec e intake
+### 15.1 Instalação local do companion
+
+- help geral lista seis comandos e `install --help` documenta `--skills`, o destino local e o caráter provider-free;
+- ausência de `--skills`, flag desconhecida e argumento posicional falham como erro de uso sem escrita;
+- instalação nova preserva exatamente árvore, bytes e modos da origem empacotada;
+- segunda instalação idêntica é no-op sem alterar timestamps ou conteúdo;
+- divergência de bytes ou modo, arquivo extra, symlink, hardlink, arquivo especial ou componente inseguro no destino falha sem mutação;
+- origem empacotada insegura ou alterada durante leitura falha sem destino parcial;
+- falha antes da promoção limpa somente o staging e preserva diretórios e conteúdo preexistentes;
+- nenhum path fora de `.agents/skills/skill-eval` muda além dos diretórios pais mínimos necessários à primeira instalação;
+- o tarball contém todos e somente os três arquivos esperados sob `skills/skill-eval/`;
+- `install` não lê autenticação, não chama provider e não altera contratos ou artefatos históricos dos outros cinco comandos.
+
+### 15.2 Spec e intake
 
 - fluxo interativo e `--answers` produzem a mesma spec canônica;
 - faltas, campos extras, ids duplicados e referências órfãs são rejeitados;
@@ -749,7 +788,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - symlink, traversal, `AGENTS.md`, `.agents`, arquivo especial e colisão de case são rejeitados;
 - snapshot regular preserva bytes e scripts executáveis.
 
-### 15.2 Autoridade e custo
+### 15.3 Autoridade e custo
 
 - `init`, `check` e `report` fazem zero provider calls;
 - falta ou valor diferente de autorização bloqueia antes da reserva;
@@ -761,7 +800,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - Terra inválido não gera fallback;
 - custo real ChatGPT permanece `UNKNOWN`.
 
-### 15.3 Isolamento e segurança
+### 15.4 Isolamento e segurança
 
 - trial contém somente fixture e target skill;
 - nenhum `AGENTS.md` ou skill concorrente chega ao workspace;
@@ -775,7 +814,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - uma cópia temporária de `SKILL.md` somente-leitura pode ser instrumentada sem alterar o modo observado pelo provider, pela origem ou pelo
   snapshot;
 
-### 15.4 Evidência e judge
+### 15.5 Evidência e judge
 
 - checks diretos precedem o batch;
 - comportamento válido, inválido e alternativa válida recebem classificação correta;
@@ -786,7 +825,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - falha crítica direta nunca é substituída por assessment favorável;
 - ativação ausente sem observador suficiente fica `NOT_ASSESSED`.
 
-### 15.5 Decisão, persistência e CLI
+### 15.6 Decisão, persistência e CLI
 
 - cada regra produz `PROCEED`, `REVISE`, `DO_NOT_PROCEED` ou `NO_DECISION` corretamente;
 - resultado negativo e interrupção permanecem no run;
@@ -796,7 +835,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - `init → check → run → report` funciona com completion, timeout, error e judge inválido determinísticos;
 - a suíte completa contabiliza zero chamadas externas.
 
-### 15.6 Probe de ativação
+### 15.7 Probe de ativação
 
 - autorização aceita somente o texto literal `3` antes de ler spec ou reservar destino;
 - marcadores têm 128 bits, formato exato, são diferentes por caso e não aparecem em prompts ou fixtures;
@@ -812,7 +851,9 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 
 O `/goal` termina somente quando:
 
-- todos os cinco comandos existem e têm help e exit codes documentados;
+- todos os seis comandos existem e têm help e exit codes documentados;
+- `install --skills` disponibiliza somente o companion empacotado no projeto atual com semântica create-only, no-op idêntico e recusa de
+  divergência, sem provider, autenticação, overwrite, escopo global ou ativação automática;
 - o fluxo completo funciona com fake provider e sem autenticação real;
 - tests demonstram teto de quatro chamadas e ausência de retries;
 - tests demonstram teto separado de três chamadas do probe, instrumentação isolada e ausência de Terra;

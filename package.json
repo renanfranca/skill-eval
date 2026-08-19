@@ -1,6 +1,6 @@
 {
   "name": "skill-eval",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Provider-bounded local evaluation of a single Codex skill",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "docs",
+    "skills/skill-eval",
     "README.md",
     "SPEC.md",
     "LICENSE"
