@@ -295,6 +295,21 @@ Cada caso contém:
 `fixtureSource` é resolvido quando `init` é executado. O conteúdo da fixture é copiado para a raiz do workspace do caso e está sujeito às
 mesmas restrições de paths e tipos de arquivo usadas no intake. Use paths absolutos ou relativos ao diretório corrente de forma consciente.
 
+### 6.5 Coerência entre prompt, autoridade e resultado
+
+Antes de executar `init`, confirme que prompt, fixture, autoridade aplicável e resultado esperado descrevem o mesmo experimento. Um teste
+positivo deve usar uma tarefa dentro do escopo e pode manter um risco latente na fixture para observar se a skill o identifica; não entregue
+toda a resolução segura no prompt nem ordene a conduta proibida esperando que a skill desobedeça.
+
+Teste exclusão de escopo separadamente: use uma tarefa estreita fora do escopo, sem invocação literal da skill, e marque-a como
+`MUST_NOT_ACTIVATE`. Os checks devem permitir que a tarefa estreita termine normalmente e rejeitar atuação ampla da skill. O campo
+`activationExpectation` registra a expectativa; ele não modifica, prefixa nem reescreve o prompt, e ausência de telemetria direta continua
+sendo `NOT_ASSESSED`.
+
+Prefira checks que observem a propriedade real. Para navegação Markdown, `MARKDOWN_LINKS_TO` verifica destinos sem depender do texto dos
+rótulos; combine-o com `PATH_EXISTS` quando a existência também for contratual. Se o instrumento estiver incoerente ou precisar de outro
+prompt, fixture, check ou resultado esperado, preserve o pacote anterior e crie uma nova avaliação com outro `evaluationId`.
+
 ## 7. Checks diretos
 
 Todo check possui `id`, `claimId`, `operator`, `required` e `failureDecision`, além dos parâmetros do operador.
