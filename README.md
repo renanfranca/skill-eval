@@ -15,10 +15,42 @@ Para instalar, configurar e operar o MVP passo a passo, consulte o [guia detalha
 - npm;
 - para uma execução model-backed futura, um Codex home autenticado por ChatGPT indicado explicitamente por `SKILL_EVAL_CODEX_HOME`.
 
+### Jornada atual: tarball local em workspace consumidor dedicado
+
+Enquanto `skill-eval@0.4.0` não estiver publicado no registry, a jornada npm
+executável parte de um tarball criado no checkout. Gere-o sem publicar o pacote:
+
+```text
+npm ci
+npm pack
+```
+
+Depois, crie um workspace que não seja o projeto avaliado, instale o arquivo
+`.tgz` por seu caminho absoluto e disponibilize o companion a partir dessa
+dependência local:
+
+```text
+mkdir my-skill-evaluation
+cd my-skill-evaluation
+npm init -y
+npm install --save-dev /caminho/absoluto/skill-eval-0.4.0.tgz
+npx --no-install skill-eval --help
+npx --no-install skill-eval install --skills
+```
+
+Depois, inicie uma nova task do Codex nesse workspace para que o companion
+possa ser descoberto. `npm install --save-dev skill-eval@0.4.0` será uma jornada
+válida somente depois de uma publicação separada no registry; nenhuma
+publicação, login, tag ou ação de release faz parte deste trabalho.
+
+### Desenvolvimento por checkout
+
+O checkout deste repositório continua suportado somente para desenvolvimento:
+
 ```text
 npm ci
 npm run build
-node dist/cli.js --help
+node "$PWD/dist/cli.js" --help
 ```
 
 As versões do Promptfoo (`0.122.0`) e do Codex SDK (`0.147.0`) estão fixadas no lockfile. Não há API pública de biblioteca.
@@ -44,7 +76,7 @@ O pacote inclui um companion conversacional que ajuda a revisar a coerência do 
 substitui os comandos da CLI, não inventa decisões do owner e não autoriza providers. Para disponibilizá-lo explicitamente no projeto atual:
 
 ```text
-skill-eval install --skills
+npx --no-install skill-eval install --skills
 ```
 
 O único destino é `.agents/skills/skill-eval` relativo ao diretório corrente. Uma instalação nova copia exatamente o companion empacotado;
@@ -130,14 +162,14 @@ Uma execução real somente pode começar depois de uma autorização explícita
 
 ```text
 SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
-  skill-eval run --spec evaluation/evaluation-spec.json --out runs/run-001 --approve-provider-calls 4
+  npx --no-install skill-eval run --spec evaluation/evaluation-spec.json --out runs/run-001 --approve-provider-calls 4
 ```
 
 O probe de ativação possui autorização e artefato próprios:
 
 ```text
 SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
-  skill-eval probe-activation --spec evaluation/evaluation-spec.json --out probes/probe-001 --approve-provider-calls 3
+  npx --no-install skill-eval probe-activation --spec evaluation/evaluation-spec.json --out probes/probe-001 --approve-provider-calls 3
 ```
 
 O preflight lê apenas metadados de um `auth.json` regular. Para as chamadas, a CLI cria um Codex home privado temporário contendo somente uma

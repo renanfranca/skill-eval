@@ -107,6 +107,20 @@ Uma avaliação é defensável quando:
 
 ## 4. Jornada e comandos públicos
 
+A jornada npm executável da versão `0.4.0` parte de um checkout local e de um
+tarball real. No checkout, `npm ci` instala exatamente o lockfile e `npm pack`
+executa o build de `prepack` e gera `skill-eval-0.4.0.tgz`. Em um workspace
+consumidor dedicado, o owner executa `npm init -y`, instala o arquivo por caminho
+absoluto com
+`npm install --save-dev /caminho/absoluto/skill-eval-0.4.0.tgz` e usa a CLI
+instalada por `npx --no-install skill-eval ...`.
+
+`npm install --save-dev skill-eval@0.4.0` será uma jornada válida somente após
+uma publicação separada no registry. Publicação, login, tag e release não fazem
+parte do MVP nem desta implementação. O checkout de desenvolvimento continua
+suportado por invocação direta de `dist/cli.js`, sem substituir silenciosamente
+a jornada do consumidor.
+
 ```text
 skill-eval install --skills
 skill-eval init --skill <directory> --out <directory> [--answers <answers.json>]
@@ -776,6 +790,8 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - origem empacotada insegura ou alterada durante leitura falha sem destino parcial;
 - falha antes da promoção limpa somente o staging e preserva diretórios e conteúdo preexistentes;
 - nenhum path fora de `.agents/skills/skill-eval` muda além dos diretórios pais mínimos necessários à primeira instalação;
+- um consumidor temporário instala o tarball real com npm e despacha `--help` e `install --skills` pelo bin local via
+  `npx --no-install`;
 - o tarball contém todos e somente os três arquivos esperados sob `skills/skill-eval/`;
 - `install` não lê autenticação, não chama provider e não altera contratos ou artefatos históricos dos outros cinco comandos.
 

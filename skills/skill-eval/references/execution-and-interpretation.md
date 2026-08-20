@@ -1,17 +1,111 @@
 # Execution and interpretation
 
-Run commands from the repository containing `package.json`. Confirm the current
-surface with `node dist/cli.js --help` and the selected subcommand's `--help`
-before acting. `SPEC.md` remains authoritative over this summary.
+## Closed package bootstrap
+
+Run the following bootstrap exactly once from the task's current working
+directory before reading product documentation or invoking any command. Pass
+the fenced block unchanged to `node --input-type=module --eval`; do not save it
+as a host-workspace file. It prints exactly one validated absolute package root
+on success.
+
+```js skill-eval-root-bootstrap
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+
+const requiredFiles = ['package.json', 'dist/cli.js', 'SPEC.md', 'docs/USAGE.md'];
+
+function isConfined(root, candidate) {
+  const pathFromRoot = relative(root, candidate);
+  return pathFromRoot === '' || (
+    pathFromRoot !== '..' &&
+    !pathFromRoot.startsWith(`..${sep}`) &&
+    !isAbsolute(pathFromRoot)
+  );
+}
+
+function isLocalDependency(packageJsonPath, startingDirectory) {
+  let cursor = realpathSync(startingDirectory);
+  while (true) {
+    try {
+      const localPackageJson = realpathSync(
+        join(cursor, 'node_modules', 'skill-eval', 'package.json'),
+      );
+      if (localPackageJson === packageJsonPath) return true;
+    } catch {
+      // This ancestor has no local skill-eval dependency.
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) return false;
+    cursor = parent;
+  }
+}
+
+function validatedRoot(candidate) {
+  try {
+    const root = realpathSync(candidate);
+    if (!lstatSync(root).isDirectory()) return undefined;
+    for (const relativePath of requiredFiles) {
+      const filePath = join(root, ...relativePath.split('/'));
+      const details = lstatSync(filePath);
+      if (!details.isFile() || details.isSymbolicLink()) return undefined;
+      if (!isConfined(root, realpathSync(filePath))) return undefined;
+    }
+    const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    return packageJson?.name === 'skill-eval' ? root : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+let packageRoot = validatedRoot(process.cwd());
+if (packageRoot === undefined) {
+  try {
+    const localRequire = createRequire(join(process.cwd(), 'package.json'));
+    const resolvedPackageJson = realpathSync(localRequire.resolve('skill-eval/package.json'));
+    if (!isLocalDependency(resolvedPackageJson, process.cwd())) {
+      throw new Error('Resolved package is not a local dependency');
+    }
+    const dependencyRoot = validatedRoot(dirname(resolvedPackageJson));
+    if (
+      dependencyRoot !== undefined &&
+      realpathSync(join(dependencyRoot, 'package.json')) === resolvedPackageJson
+    ) {
+      packageRoot = dependencyRoot;
+    }
+  } catch {
+    packageRoot = undefined;
+  }
+}
+
+if (packageRoot === undefined) {
+  process.stderr.write(
+    'skill-eval companion: no validated checkout or local skill-eval dependency was found.\n',
+  );
+  process.exit(1);
+}
+
+process.stdout.write(`${packageRoot}\n`);
+```
+
+Record stdout as `<skill-eval-root>`. Read only
+`<skill-eval-root>/SPEC.md` and `<skill-eval-root>/docs/USAGE.md`, then confirm
+the current surface with
+`node "<skill-eval-root>/dist/cli.js" --help` and the selected subcommand's
+`--help` before acting. The resolved `SPEC.md` remains authoritative over this
+summary. Never substitute same-named files from the host workspace. If the
+bootstrap fails, stop without global lookup, `PATH` search, `npx`, install, or
+network fallback.
 
 ## Commands
 
 ```text
-node dist/cli.js init --skill <directory> --out <new-evaluation-directory> [--answers <answers.json>]
-node dist/cli.js check --spec <evaluation-spec.json>
-node dist/cli.js run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
-node dist/cli.js probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
-node dist/cli.js report --run <run-directory> --format json|markdown [--out <new-file>]
+node "<skill-eval-root>/dist/cli.js" install --skills
+node "<skill-eval-root>/dist/cli.js" init --skill <directory> --out <new-evaluation-directory> [--answers <answers.json>]
+node "<skill-eval-root>/dist/cli.js" check --spec <evaluation-spec.json>
+node "<skill-eval-root>/dist/cli.js" run --spec <evaluation-spec.json> --out <new-run-directory> --approve-provider-calls 4
+node "<skill-eval-root>/dist/cli.js" probe-activation --spec <evaluation-spec.json> --out <new-probe-directory> --approve-provider-calls 3
+node "<skill-eval-root>/dist/cli.js" report --run <run-directory> --format json|markdown [--out <new-file>]
 ```
 
 `init`, `check`, and `report` are provider-free. `init` requires a complete,

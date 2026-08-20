@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { pathToFileURL } from 'node:url';
-import path from 'node:path';
 import { SkillEvalError, usageError } from './errors.js';
 import { installCompanion } from './install/companion.js';
 import { initializeEvaluation, readAnswers } from './intake/init.js';
@@ -111,8 +109,7 @@ export async function main(argv: string[]): Promise<number> {
   throw usageError(`Unknown command: ${command}`);
 }
 
-const entryPoint = process.argv[1];
-if (entryPoint !== undefined && import.meta.url === pathToFileURL(path.resolve(entryPoint)).href) {
+if (import.meta.main) {
   main(process.argv.slice(2)).then(
     (code) => { process.exitCode = code; },
     (error: unknown) => {

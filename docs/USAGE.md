@@ -26,33 +26,64 @@ Requisitos:
 - para `run` ou `probe-activation`, um Codex home já autenticado por ChatGPT e contendo um `auth.json` regular;
 - uma skill local cujo diretório tenha um `SKILL.md` regular na raiz.
 
-### 2.1 Uso a partir do repositório
+### 2.1 Jornada atual por tarball em um workspace dedicado
+
+`skill-eval@0.4.0` ainda não está publicado no registry. A jornada npm
+executável atual mantém a ferramenta e seus artefatos fora do projeto avaliado
+e parte de um tarball local. No checkout de desenvolvimento do `skill-eval`,
+instale as dependências e crie o pacote:
 
 ```bash
 npm ci
-npm run build
-node dist/cli.js --help
-```
-
-Os exemplos deste guia usam `node dist/cli.js`. Se o pacote já estiver instalado e seu binário estiver no `PATH`, substitua essa expressão
-por `skill-eval`.
-
-### 2.2 Instalação da CLI a partir de um tarball local
-
-Gerar e instalar um tarball são ações locais; publicação no npm não faz parte do MVP.
-
-```bash
-npm ci
-npm run build
 npm pack
-npm install --save-dev ./skill-eval-0.4.0.tgz
-npx skill-eval --help
 ```
+
+O script `prepack` constrói `dist/` antes de gerar
+`skill-eval-0.4.0.tgz`. Em seguida, crie o workspace consumidor e instale esse
+arquivo por seu caminho absoluto:
+
+```bash
+mkdir my-skill-evaluation
+cd my-skill-evaluation
+npm init -y
+npm install --save-dev /caminho/absoluto/skill-eval-0.4.0.tgz
+npx --no-install skill-eval --help
+npx --no-install skill-eval install --skills
+```
+
+Inicie uma nova task do Codex nesse workspace depois da instalação; a task
+corrente pode não atualizar a descoberta do companion. Os exemplos operacionais
+deste guia usam `npx --no-install skill-eval`, que seleciona o binário da
+dependência já instalada sem autorizar download de fallback. Gerar e instalar o
+tarball são ações locais; não publicam o pacote.
+
+### 2.2 Jornada futura pelo registry
+
+Somente depois de uma publicação separada no registry a instalação abaixo será
+uma jornada válida:
+
+```bash
+npm install --save-dev skill-eval@0.4.0
+```
+
+Ela não funciona como caminho atual porque essa versão não está publicada. Este
+MVP não faz login, publicação, tag, release nem instalação global.
 
 O pacote distribuído inclui `README.md`, `SPEC.md`, este guia, `LICENSE`, o JavaScript compilado e o companion em `skills/skill-eval`. Inputs
 de avaliação, runs e credenciais não pertencem ao tarball.
 
-### 2.3 Companion conversacional local e opcional
+### 2.3 Desenvolvimento por checkout
+
+O checkout do próprio `skill-eval` é suportado para desenvolvimento, não é a
+jornada npm do consumidor:
+
+```bash
+npm ci
+npm run build
+node "$PWD/dist/cli.js" --help
+```
+
+### 2.4 Companion conversacional local e opcional
 
 O companion ajuda uma conversa Codex a revisar o desenho do instrumento e operar o fluxo documentado. A CLI continua responsável por criar,
 validar, executar e reportar os artefatos; instalar o companion não executa esses comandos nem concede autorização de provider.
@@ -60,7 +91,7 @@ validar, executar e reportar os artefatos; instalar o companion não executa ess
 No projeto em que o companion deve ficar disponível para descoberta futura, execute explicitamente:
 
 ```bash
-node dist/cli.js install --skills
+npx --no-install skill-eval install --skills
 ```
 
 O destino é sempre `.agents/skills/skill-eval` sob o diretório corrente. Não há argumento de path, instalação global, `--force`, overwrite,
@@ -129,7 +160,7 @@ O `init` aceita dois modos equivalentes.
 ### 5.1 Modo interativo
 
 ```bash
-node dist/cli.js init --skill ./my-skill --out ./evaluations/my-evaluation
+npx --no-install skill-eval init --skill ./my-skill --out ./evaluations/my-evaluation
 ```
 
 A CLI pede a pergunta decisória, o significado de prosseguir, as claims e os três casos. Claims e casos são informados como JSON durante o
@@ -138,7 +169,7 @@ questionário. Antes de criar o pacote, a CLI mostra a resposta canônica e pede
 ### 5.2 Modo não interativo
 
 ```bash
-node dist/cli.js init \
+npx --no-install skill-eval init \
   --skill ./my-skill \
   --out ./evaluations/my-evaluation \
   --answers ./answers.json
@@ -416,7 +447,7 @@ evaluations/my-evaluation/
 Execute:
 
 ```bash
-node dist/cli.js check --spec ./evaluations/my-evaluation/evaluation-spec.json
+npx --no-install skill-eval check --spec ./evaluations/my-evaluation/evaluation-spec.json
 ```
 
 `check` valida offline o JSON canônico, chaves exatas, ids, referências, kinds, paths, digests, configuração de execução e ausência de contexto
@@ -433,7 +464,7 @@ Bash:
 
 ```bash
 SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
-  node dist/cli.js run \
+  npx --no-install skill-eval run \
   --spec ./evaluations/my-evaluation/evaluation-spec.json \
   --out ./runs/my-evaluation-001 \
   --approve-provider-calls 4
@@ -443,7 +474,7 @@ PowerShell:
 
 ```powershell
 $env:SKILL_EVAL_CODEX_HOME = 'C:\path\to\authenticated-codex-home'
-node dist/cli.js run `
+npx --no-install skill-eval run `
   --spec ./evaluations/my-evaluation/evaluation-spec.json `
   --out ./runs/my-evaluation-001 `
   --approve-provider-calls 4
@@ -481,7 +512,7 @@ Bash:
 
 ```bash
 SKILL_EVAL_CODEX_HOME=/path/to/authenticated-codex-home \
-  node dist/cli.js probe-activation \
+  npx --no-install skill-eval probe-activation \
   --spec ./evaluations/my-evaluation/evaluation-spec.json \
   --out ./probes/my-evaluation-activation-001 \
   --approve-provider-calls 3
@@ -491,7 +522,7 @@ PowerShell:
 
 ```powershell
 $env:SKILL_EVAL_CODEX_HOME = 'C:\path\to\authenticated-codex-home'
-node dist/cli.js probe-activation `
+npx --no-install skill-eval probe-activation `
   --spec ./evaluations/my-evaluation/evaluation-spec.json `
   --out ./probes/my-evaluation-activation-001 `
   --approve-provider-calls 3
@@ -570,18 +601,18 @@ Runs permanecem locais, são ignorados pelo Git e não têm upload ou retenção
 Escrever JSON em stdout:
 
 ```bash
-node dist/cli.js report --run ./runs/my-evaluation-001 --format json
+npx --no-install skill-eval report --run ./runs/my-evaluation-001 --format json
 ```
 
 Criar arquivos novos:
 
 ```bash
-node dist/cli.js report \
+npx --no-install skill-eval report \
   --run ./runs/my-evaluation-001 \
   --format json \
   --out ./reports/my-evaluation-001.json
 
-node dist/cli.js report \
+npx --no-install skill-eval report \
   --run ./runs/my-evaluation-001 \
   --format markdown \
   --out ./reports/my-evaluation-001.md
