@@ -84,6 +84,12 @@ uma árvore já idêntica é no-op; qualquer diferença, arquivo extra ou tipo i
 `--force`, instalação global, overwrite, `postinstall`, provider ou ativação automática. A descoberta do companion pode exigir uma nova task
 do Codex, e a instalação não comprova ativação na task atual.
 
+A cópia nova usa staging privado no mesmo filesystem, valida a árvore completa, rechecando o destino imediatamente antes de promovê-la por
+`rename`. Se um destino vazio ou não vazio surgir antes dessa rechecagem, ele é preservado e somente o staging é removido. Com o workspace e
+o destino estáveis depois da rechecagem, a promoção publica a árvore completa sem instalação parcial. Ela não usa código nativo no-replace
+nem lock; uma mutação externa não cooperativa posterior, feita por outro processo da mesma conta do sistema operacional, fica fora do threat
+model. Essa limitação não autoriza o comando a remover, mesclar, atualizar ou substituir deliberadamente uma instalação observada.
+
 O fluxo assistido é `companion → confirmação explícita do owner → init → check`. Usar `init` e `check` diretamente, sem instalar ou usar o
 companion, continua sendo uma alternativa completa e válida.
 

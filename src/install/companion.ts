@@ -209,6 +209,8 @@ export async function installCompanion(options: InstallCompanionOptions = {}): P
     }
 
     await options.testHooks?.beforePromotion?.();
+    // Defense in depth for a stable workspace and destination: rename publishes the
+    // complete tree, but is not a native no-replace primitive against later same-user mutation.
     if (await pathExists(destination)) {
       throw integrityError(`Refusing to overwrite companion path created during installation: ${destination}`);
     }

@@ -98,6 +98,14 @@ O destino é sempre `.agents/skills/skill-eval` sob o diretório corrente. Não 
 `postinstall`, provider ou efeito implícito de `init`. A primeira instalação copia exatamente a árvore empacotada. Repetir sobre uma árvore
 idêntica retorna sucesso sem alterar timestamps; uma instalação divergente ou insegura é recusada integralmente.
 
+Uma instalação nova usa staging privado no mesmo filesystem e valida a árvore completa. A rechecagem do destino imediatamente antes do
+`rename` funciona como defesa em profundidade: se um diretório vazio ou com conteúdo tiver surgido, a CLI retorna exit code 4, preserva esse
+diretório e remove somente o staging. Desde que o diretório de trabalho, seus componentes e o destino permaneçam estáveis depois dessa
+rechecagem, o `rename` publica a árvore completa sem estado parcialmente instalado. Essa garantia de publicação atômica não é uma promoção
+nativa no-replace: não há código nativo, comando externo ou lock. Mutação externa não cooperativa depois da rechecagem por outro processo da
+mesma conta do sistema operacional fica fora do threat model; o comando continua sem remover, mesclar, atualizar ou substituir
+deliberadamente qualquer instalação observada.
+
 Talvez seja necessário iniciar uma nova task do Codex para atualizar a descoberta. A instalação não promete leitura ou ativação na task
 corrente. Quem não quiser o companion pode usar todos os comandos da CLI diretamente; esse caminho permanece completo e suportado.
 

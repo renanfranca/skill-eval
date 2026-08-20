@@ -144,11 +144,18 @@ O companion distribuído contém somente `SKILL.md`, `references/execution-and-i
 colisões case-insensitive ou mudanças durante a leitura. Componentes já existentes do caminho `.agents/skills` precisam ser diretórios
 regulares e não podem atravessar symlinks.
 
-Quando o destino não existe, o comando copia a árvore para um staging privado no mesmo filesystem, preserva bytes e modos, confirma a
-identidade completa e promove o staging atomicamente para `.agents/skills/skill-eval`. Uma falha remove somente o staging criado pela
-operação e preserva todo conteúdo preexistente. Quando o destino existe, a árvore canônica completa — paths, bytes e modos — precisa ser
-idêntica à origem para produzir um no-op de sucesso; qualquer diferença, arquivo extra ou tipo inseguro é recusado sem mutação. O comando
-nunca mescla, substitui, atualiza, renomeia ou apaga uma instalação divergente.
+Quando o destino existe na inspeção inicial, a árvore canônica completa — paths, bytes e modos — precisa ser idêntica à origem para produzir
+um no-op de sucesso; qualquer diferença, arquivo extra ou tipo inseguro é recusado sem mutação. Quando o destino não existe, o comando copia
+a árvore para um staging privado no mesmo filesystem, preserva bytes e modos e confirma a identidade completa. Imediatamente antes da
+promoção, rechecá-lo é uma defesa em profundidade: se um destino vazio ou não vazio tiver surgido, a operação o preserva, remove somente seu
+staging e termina com exit code 4.
+
+Sob a precondição de que o diretório de trabalho, seus componentes e o destino permaneçam estáveis depois dessa rechecagem final, o `rename`
+publica a árvore validada completa em uma única promoção, sem expor uma instalação parcial. Essa atomicidade descreve a publicação da árvore
+completa; não equivale a `RENAME_NOREPLACE` nem a outra promoção nativa no-replace. O MVP não usa código nativo, comando externo ou lock para
+fechar o intervalo entre a rechecagem e o `rename`. Mutação externa não cooperativa nesse intervalo por outro processo com a mesma conta do
+sistema operacional permanece fora do threat model. Dentro da fronteira declarada, o comando nunca remove, mescla, substitui, atualiza,
+renomeia ou apaga deliberadamente uma instalação observada, e uma falha remove somente o staging criado pela operação.
 
 Instalação nova ou no-op idêntico usa exit code 0 e informa o path instalado, explicando que a descoberta pode exigir uma nova task do Codex
 e não implica ativação na task atual. Erro de uso usa exit code 2. Origem ou destino inseguro, divergência, overwrite tentado ou falha de
@@ -789,6 +796,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - divergência de bytes ou modo, arquivo extra, symlink, hardlink, arquivo especial ou componente inseguro no destino falha sem mutação;
 - origem empacotada insegura ou alterada durante leitura falha sem destino parcial;
 - falha antes da promoção limpa somente o staging e preserva diretórios e conteúdo preexistentes;
+- destino vazio ou não vazio surgido antes da rechecagem final é preservado, recebe exit code 4 e não deixa staging nem instalação parcial;
 - nenhum path fora de `.agents/skills/skill-eval` muda além dos diretórios pais mínimos necessários à primeira instalação;
 - um consumidor temporário instala o tarball real com npm e despacha `--help` e `install --skills` pelo bin local via
   `npx --no-install`;

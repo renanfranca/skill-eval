@@ -248,21 +248,29 @@ describe('provider-free local companion installation', () => {
     expect(await readFile(path.join(workspace, 'root-sentinel.txt'), 'utf8')).toBe('preserve root content');
   });
 
-  it('never overwrites a destination created concurrently before promotion', async () => {
+  it.each([
+    { label: 'empty', sentinel: null },
+    { label: 'non-empty', sentinel: 'concurrent owner data' },
+  ])('refuses and preserves a $label destination created before the final recheck', async ({ sentinel }) => {
     const workspace = await makeWorkspace('skill-eval-install-concurrent-');
     const destination = path.join(workspace, '.agents', 'skills', 'skill-eval');
+    let destinationBeforeRecheck: SnapshotEntry[] | undefined;
     await expect(installCompanion({
       cwd: workspace,
       packageRoot: repositoryRoot,
       testHooks: {
         beforePromotion: async () => {
           await mkdir(destination);
-          await writeFile(path.join(destination, 'sentinel.txt'), 'concurrent owner data');
+          if (sentinel !== null) await writeFile(path.join(destination, 'sentinel.txt'), sentinel);
+          destinationBeforeRecheck = await snapshot(destination);
         },
       },
     })).rejects.toMatchObject({ exitCode: 4 });
 
-    expect(await readFile(path.join(destination, 'sentinel.txt'), 'utf8')).toBe('concurrent owner data');
+    expect(await snapshot(destination)).toEqual(destinationBeforeRecheck);
+    expect(await readdir(destination)).toEqual(sentinel === null ? [] : ['sentinel.txt']);
+    if (sentinel !== null) expect(await readFile(path.join(destination, 'sentinel.txt'), 'utf8')).toBe(sentinel);
+    await expect(access(path.join(destination, 'SKILL.md'))).rejects.toThrow();
     expect((await readdir(path.dirname(destination))).filter((name) => name.startsWith('.skill-eval-install-'))).toEqual([]);
   });
 
