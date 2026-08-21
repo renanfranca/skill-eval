@@ -125,7 +125,9 @@ describe('provider-bounded run and deterministic report', () => {
       requiresAuthentication: true,
       execute: () => {
         called = true;
-        return Promise.resolve({ status: 'error' as const, elapsedMs: 0, message: 'must not execute' });
+        return Promise.resolve({
+          status: 'error' as const, errorKind: 'instrument' as const, elapsedMs: 0, message: 'must not execute',
+        });
       },
     };
     const out = path.join(fixture.root, 'run-no-auth');
@@ -140,11 +142,56 @@ describe('provider-bounded run and deterministic report', () => {
   ])('debits one %s attempt and performs zero retries', async (_label, first, expectedStatus) => {
     const fixture = await makePackage();
     const provider = new FakeProvider([first, ...completions()]);
-    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, `run-${_label}`), approveProviderCalls: '4', provider });
+    const run = path.join(fixture.root, `run-${_label}`);
+    const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider });
     expect(result.exitCode).toBe(3);
     expect(result.terminal.status).toBe(expectedStatus);
     expect(result.terminal.calls).toMatchObject({ attempted: 1, retries: 0 });
     expect(provider.requests).toHaveLength(1);
+    if (_label === 'error') {
+      const events = (await readFile(path.join(run, 'case-results.jsonl'), 'utf8'))
+        .trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.find((event) => event['event'] === 'CALL_RESULT')).toMatchObject({
+        status: 'error', errorKind: 'provider', callNumber: 1,
+      });
+    }
+  });
+
+  it('classifies a candidate instrument error without retry and persists its origin for reporting', async () => {
+    const fixture = await makePackage();
+    const provider = new FakeProvider([{
+      type: 'error', errorKind: 'instrument', message: 'local adapter shape failure',
+    }, ...completions()]);
+    const run = path.join(fixture.root, 'run-candidate-instrument-error');
+
+    const result = await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 3,
+      terminal: {
+        status: 'INSTRUMENT_INVALID', recommendation: 'NO_DECISION',
+        calls: { attempted: 1, completed: 0, timeout: 0, error: 1, retries: 0 },
+        cases: [expect.objectContaining({ status: 'INSTRUMENT_INVALID' })],
+        suggestedAction: expect.stringMatching(/correct the evaluation instrument before creating/i),
+      },
+    });
+    expect(provider.requests).toHaveLength(1);
+    const events = (await readFile(path.join(run, 'case-results.jsonl'), 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.find((event) => event['event'] === 'CALL_RESULT')).toMatchObject({
+      status: 'error', errorKind: 'instrument', callNumber: 1,
+    });
+    await expect(buildReport(run)).resolves.toMatchObject({
+      decision: { recommendation: 'NO_DECISION' },
+      terminal: { status: 'INSTRUMENT_INVALID' },
+      cases: [expect.objectContaining({ status: 'INSTRUMENT_INVALID' })],
+      suggestedAction: expect.stringMatching(/correct the evaluation instrument before creating/i),
+    });
   });
 
   it('preserves a direct critical failure, stops remaining calls, and never lets a judge override it', async () => {
@@ -254,6 +301,42 @@ describe('provider-bounded run and deterministic report', () => {
     expect(provider.requests).toHaveLength(4);
   });
 
+  it('classifies a judge instrument error as INSTRUMENT_INVALID after exactly one debited judge attempt', async () => {
+    const answers = directAnswers();
+    answers.cases[0].semanticCriteria = [{
+      id: 'semantic-meaning', claimId: 'behavior',
+      statement: 'The output conveys the requested meaning.', required: true,
+    }];
+    const fixture = await makePackage(answers);
+    const provider = new FakeProvider([
+      ...completions(),
+      { type: 'error', errorKind: 'instrument', message: 'local judge adapter failure' },
+      { type: 'completion', output: 'retry forbidden' },
+    ]);
+    const run = path.join(fixture.root, 'run-judge-instrument-error');
+
+    const result = await runEvaluation({
+      specPath: fixture.specPath, outDirectory: run, approveProviderCalls: '4', provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 3,
+      terminal: {
+        status: 'INSTRUMENT_INVALID', recommendation: 'NO_DECISION',
+        calls: { attempted: 4, completed: 3, timeout: 0, error: 1, retries: 0 },
+        judgeQualification: { attempted: true, valid: false, summary: 'local judge adapter failure' },
+        suggestedAction: expect.stringMatching(/correct the evaluation instrument before creating/i),
+      },
+    });
+    expect(provider.requests).toHaveLength(4);
+    expect(result.terminal.directObservations).toHaveLength(3);
+    await expect(buildReport(run)).resolves.toMatchObject({
+      terminal: { status: 'INSTRUMENT_INVALID' },
+      decision: { recommendation: 'NO_DECISION' },
+      calls: { attempted: 4, error: 1, retries: 0 },
+    });
+  });
+
   it('keeps absent activation telemetry NOT_ASSESSED rather than treating heuristic absence as proof', async () => {
     const answers = directAnswers();
     answers.claims = [{ id: 'activation', statement: 'The target activates when required.', kind: 'ACTIVATION', required: true, failureDecision: 'REVISE' }];
@@ -333,7 +416,9 @@ describe('provider-bounded run and deterministic report', () => {
       requiresAuthentication: true,
       execute: (request) => {
         temporaryHome = request.codexHome;
-        return Promise.resolve({ status: 'error' as const, elapsedMs: 1, message: 'captured deterministic error' });
+        return Promise.resolve({
+          status: 'error' as const, errorKind: 'provider' as const, elapsedMs: 1, message: 'captured deterministic error',
+        });
       },
     };
     const result = await runEvaluation({ specPath: fixture.specPath, outDirectory: path.join(fixture.root, 'run-auth-error'), approveProviderCalls: '4', provider, codexHomeSource: sourceHome });
@@ -477,6 +562,32 @@ describe('provider-bounded run and deterministic report', () => {
         checkId: 'legacy-file-fragment',
         observation: legacyObservation,
       })],
+    });
+  });
+
+  it('accepts legacy provider-error events without errorKind and preserves their historical terminal classification', async () => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, 'run-legacy-provider-error');
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', message: 'historical provider error' }]),
+    });
+
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    for (const event of events) {
+      if (event['event'] === 'CALL_RESULT') delete event['errorKind'];
+    }
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+
+    await expect(buildReport(run)).resolves.toMatchObject({
+      terminal: { status: 'PROVIDER_ERROR' },
+      decision: { recommendation: 'NO_DECISION' },
+      cases: [expect.objectContaining({ status: 'PROVIDER_ERROR' })],
+      calls: { attempted: 1, error: 1, retries: 0 },
     });
   });
 

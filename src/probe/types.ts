@@ -11,7 +11,7 @@ export interface ActivationProbeRecord {
   marker: string;
   baseSkillDigest: `sha256:${string}`;
   instrumentedSkillDigest: `sha256:${string}`;
-  status: 'COMPLETED' | 'TIMEOUT' | 'PROVIDER_ERROR' | 'ENVIRONMENT_FAILURE';
+  status: 'COMPLETED' | 'TIMEOUT' | 'PROVIDER_ERROR' | 'INSTRUMENT_INVALID' | 'ENVIRONMENT_FAILURE';
   elapsedMs: number;
   usage?: TokenUsage;
   error?: string;

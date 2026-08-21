@@ -7,7 +7,7 @@ import { estimateApiEquivalent } from '../evidence/cost.js';
 import { appendJsonLine, ensureNewDirectory, writeCreateOnly, writeJsonCreateOnly } from '../evidence/persistence.js';
 import { prepareJudgeBatch, getJudgeResultSchema, validateJudgeOutput, type JudgeCriterionResult } from '../judge/batch.js';
 import { prepareTemporaryCodexHome, type TemporaryCodexHome } from '../runtime/auth.js';
-import type { EvaluationProvider, ProviderResult, TokenUsage } from '../runtime/provider.js';
+import type { EvaluationProvider, ProviderErrorKind, ProviderResult, TokenUsage } from '../runtime/provider.js';
 import { createTrialWorkspace, verifyTrialWorkspace } from '../runtime/workspace.js';
 import { canonicalJson, redactSecrets, sha256Bytes } from '../spec/canonical.js';
 import { checkEvaluationPackage } from '../spec/validate.js';
@@ -43,6 +43,7 @@ interface ProviderAccountingRecord {
   elapsedMs: number;
   usage?: TokenUsage;
   message?: string;
+  errorKind?: ProviderErrorKind;
 }
 
 const LIMITATIONS = [
@@ -162,6 +163,7 @@ function providerAccountingRecord(
     elapsedMs: result.elapsedMs,
     ...(result.status === 'completion' && result.usage !== undefined ? { usage: result.usage } : {}),
     ...(result.status === 'completion' ? {} : { message: redactSecrets(result.message).slice(0, 2000) }),
+    ...(result.status === 'error' ? { errorKind: result.errorKind } : {}),
   };
 }
 
@@ -210,7 +212,9 @@ async function reserveRun(
 }
 
 function terminalStatusForResult(result: ProviderResult): TerminalStatus {
-  return result.status === 'timeout' ? 'EXECUTION_TIMEOUT' : 'PROVIDER_ERROR';
+  if (result.status === 'timeout') return 'EXECUTION_TIMEOUT';
+  if (result.status === 'error' && result.errorKind === 'instrument') return 'INSTRUMENT_INVALID';
+  return 'PROVIDER_ERROR';
 }
 
 export async function runEvaluation(options: RunOptions): Promise<RunResult> {
@@ -271,21 +275,28 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
           role: 'candidate', model: 'gpt-5.6-luna', reasoningEffort: 'max', prompt: item.prompt,
           timeoutMs: 600_000, workspace: trial.path,
           ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
-        }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
+        }).catch((error: unknown): ProviderResult => ({
+          status: 'error', errorKind: 'instrument', elapsedMs: 0, message: safeMessage(error),
+        }));
         const providerRecord = providerAccountingRecord(callsAttempted, 'candidate', 'gpt-5.6-luna', result, item.id);
         await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: clock.now().toISOString() });
         providerRecords.push(providerRecord);
         if (result.status !== 'completion') {
           const record: CaseRecord = {
             caseId: item.id, kind: item.kind, callNumber: callsAttempted,
-            status: result.status === 'timeout' ? 'TIMEOUT' : 'PROVIDER_ERROR', elapsedMs: result.elapsedMs,
+            status: result.status === 'timeout'
+              ? 'TIMEOUT'
+              : result.errorKind === 'instrument' ? 'INSTRUMENT_INVALID' : 'PROVIDER_ERROR',
+            elapsedMs: result.elapsedMs,
             error: redactSecrets(result.message), filesystemChanges: [], checks: [],
             activation: { expectation: item.activationExpectation, skillMdRead: false, promptfooSkillUsedHeuristic: false },
           };
           cases.push(record);
           await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CASE_RESULT', ...record });
           terminalStatus = terminalStatusForResult(result);
-          stoppingRule = `${result.status} is terminal and receives zero retries`;
+          stoppingRule = result.status === 'error' && result.errorKind === 'instrument'
+            ? 'Candidate instrument error is terminal and receives zero retries'
+            : `${result.status} is terminal and receives zero retries`;
           instrumentInvalid = true;
           break;
         }
@@ -393,13 +404,17 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
             role: 'judge', model: 'gpt-5.6-terra', reasoningEffort: 'xhigh', prompt: prepared.prompt,
             timeoutMs: 600_000, workspace: judgeWorkspace, outputSchema: getJudgeResultSchema(),
             ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
-          }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
+          }).catch((error: unknown): ProviderResult => ({
+            status: 'error', errorKind: 'instrument', elapsedMs: 0, message: safeMessage(error),
+          }));
           const providerRecord = providerAccountingRecord(callsAttempted, 'judge', 'gpt-5.6-terra', judgeResult);
           await appendJsonLine(path.join(out, 'case-results.jsonl'), { event: 'CALL_RESULT', ...providerRecord, at: clock.now().toISOString() });
           providerRecords.push(providerRecord);
           if (judgeResult.status !== 'completion') {
             terminalStatus = terminalStatusForResult(judgeResult);
-            stoppingRule = `Judge ${judgeResult.status} is terminal and receives zero retries`;
+            stoppingRule = judgeResult.status === 'error' && judgeResult.errorKind === 'instrument'
+              ? 'Judge instrument error is terminal and receives zero retries'
+              : `Judge ${judgeResult.status} is terminal and receives zero retries`;
             judgeValid = false;
             judgeSummary = redactSecrets(judgeResult.message);
             instrumentInvalid = true;
@@ -464,7 +479,7 @@ export async function runEvaluation(options: RunOptions): Promise<RunResult> {
       },
       cost: estimateApiEquivalent(providerRecords.map((record) => ({ model: record.model, ...(record.usage === undefined ? {} : { usage: record.usage }) }))),
       limitations: limitationsFor(clock.maxWallClockSkewMs()),
-      suggestedAction: suggestedAction(recommendation),
+      suggestedAction: suggestedAction(recommendation, terminalStatus === 'INSTRUMENT_INVALID'),
       reevaluationTriggers: REEVALUATION_TRIGGERS,
       completedAt: completedAt.toISOString(),
     };

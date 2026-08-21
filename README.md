@@ -216,7 +216,7 @@ está disponível e nunca é apresentada como custo real da assinatura.
 | ---: | --- |
 | 0 | artefato válido, inclusive `REVISE`, `DO_NOT_PROCEED` ou probe `NOT_CONFIRMED` |
 | 2 | erro de uso, spec ou preflight antes da reserva |
-| 3 | run ou probe reservado inconclusivo por timeout, provider, ambiente ou judge inválido |
+| 3 | run ou probe reservado inconclusivo por instrumento, timeout, provider, ambiente ou judge inválido |
 | 4 | corrupção, tentativa de overwrite, path inseguro ou violação de integridade |
 
 ## Desenvolvimento provider-free

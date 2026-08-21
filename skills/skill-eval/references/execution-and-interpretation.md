@@ -132,7 +132,12 @@ or selectively replace negative evidence. A reserved run or probe is never
 resumed; a new observation needs a new directory and a fresh literal
 authorization.
 
-Each attempted timeout or provider error spends a call and receives no retry.
+Each attempted timeout, provider error, or instrument error spends a call and
+receives no retry. A non-timeout Promptfoo exception, missing result, or
+structurally invalid response is an instrument error; an error actually
+returned by the provider remains a provider error. In a run, an instrument
+error requires correcting the instrument before any separate newly authorized
+run.
 Direct checks run before semantic assessment. A direct `DO_NOT_PROCEED` failure
 stops immediately; a sufficient required `REVISE` failure may also stop before
 the judge. The judge runs at most once, only when required semantics remain, and
@@ -156,6 +161,10 @@ recommendation. Exit code `3` is an inconclusive reserved execution; exit code
 The probe is a separate three-call Luna/max observation using case-specific
 markers added only to temporary `SKILL.md` copies. It never calls the judge and
 never changes a run or its recommendation.
+
+A provider error or timeout does not by itself prevent later safe probe cases.
+An instrument error is recorded as `INSTRUMENT_INVALID`, stops the remaining
+attempts, and makes the probe `INCONCLUSIVE`.
 
 `CONFIRMED` demonstrates exposure to and influence from the temporary marker,
 not operating-system file-read telemetry, correctness, reference-file reading,

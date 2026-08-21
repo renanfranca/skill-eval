@@ -98,7 +98,10 @@ export function recommend(
   return 'PROCEED';
 }
 
-export function suggestedAction(recommendation: Recommendation): string {
+export function suggestedAction(recommendation: Recommendation, instrumentInvalid = false): string {
+  if (instrumentInvalid) {
+    return 'Correct the evaluation instrument before creating a separate newly authorized run; never resume this run.';
+  }
   switch (recommendation) {
     case 'PROCEED': return 'Proceed only under the exact observed condition and declared boundary.';
     case 'REVISE': return 'Revise the skill or evaluation contract, then create a separate newly authorized run.';

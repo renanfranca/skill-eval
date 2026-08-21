@@ -272,9 +272,10 @@ function classify(records: ActivationProbeRecord[]): ActivationProbeStatus {
   return 'INCONCLUSIVE';
 }
 
-function stoppingRule(status: ActivationProbeStatus, unsafeStop: boolean): string {
+function stoppingRule(status: ActivationProbeStatus, unsafeStop: boolean, instrumentInvalid: boolean): string {
   if (status === 'NOT_CONFIRMED') return 'At least one completed response did not contain its case-specific activation marker';
   if (status === 'CONFIRMED') return 'All three completed responses contained their case-specific activation markers';
+  if (instrumentInvalid) return 'An evaluation instrument error prevented safe continuation after the attempted call';
   if (unsafeStop) return 'Unsafe environment, integrity, or sanitization state prevented safe continuation';
   return 'Timeout or provider error prevented all three cases from completing with confirmed markers';
 }
@@ -311,6 +312,7 @@ export async function runActivationProbe(options: ActivationProbeOptions): Promi
     const providerRecords: ProviderAccountingRecord[] = [];
     let callsAttempted = 0;
     let unsafeStop = false;
+    let instrumentInvalid = false;
 
     for (const { item, marker } of caseMarkers) {
       if (callsAttempted >= 3) throw integrityError('Activation probe call budget exhausted before all cases');
@@ -351,7 +353,9 @@ export async function runActivationProbe(options: ActivationProbeOptions): Promi
           role: 'candidate', model: 'gpt-5.6-luna', reasoningEffort: 'max', prompt: item.prompt,
           timeoutMs: 600_000, workspace: trial.path,
           ...(temporaryHome === undefined ? {} : { codexHome: temporaryHome.path }),
-        }).catch((error: unknown): ProviderResult => ({ status: 'error', elapsedMs: 0, message: safeMessage(error) }));
+        }).catch((error: unknown): ProviderResult => ({
+          status: 'error', errorKind: 'instrument', elapsedMs: 0, message: safeMessage(error),
+        }));
         const accounting: ProviderAccountingRecord = {
           callNumber: callsAttempted, status: result.status, elapsedMs: result.elapsedMs,
           ...(result.status === 'completion' && result.usage !== undefined ? { usage: result.usage } : {}),
@@ -386,11 +390,19 @@ export async function runActivationProbe(options: ActivationProbeOptions): Promi
         if (result.status !== 'completion') {
           const record: ActivationProbeRecord = {
             caseId: item.id, kind: item.kind, callNumber: callsAttempted, marker, ...digests,
-            status: result.status === 'timeout' ? 'TIMEOUT' : 'PROVIDER_ERROR', elapsedMs: result.elapsedMs,
+            status: result.status === 'timeout'
+              ? 'TIMEOUT'
+              : result.errorKind === 'instrument' ? 'INSTRUMENT_INVALID' : 'PROVIDER_ERROR',
+            elapsedMs: result.elapsedMs,
             error: redactSecrets(result.message).slice(0, 2000),
           };
           records.push(record);
           await appendJsonLine(path.join(out, 'probe-results.jsonl'), { event: 'PROBE_RESULT', ...record, at: clock.now().toISOString() });
+          if (result.status === 'error' && result.errorKind === 'instrument') {
+            unsafeStop = true;
+            instrumentInvalid = true;
+            break;
+          }
           continue;
         }
 
@@ -435,7 +447,7 @@ export async function runActivationProbe(options: ActivationProbeOptions): Promi
     const terminal: ActivationProbeTerminal = {
       schemaVersion: 1,
       status,
-      stoppingRule: stoppingRule(status, unsafeStop),
+      stoppingRule: stoppingRule(status, unsafeStop, instrumentInvalid),
       evaluationId: spec.evaluationId,
       calls: {
         authorized: 3, attempted: providerRecords.length, completed, timeout, error, maximum: 3, retries: 0,

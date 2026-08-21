@@ -7,7 +7,7 @@ import { canonicalJson, sha256Bytes } from '../spec/canonical.js';
 import { assertPathHasNoSymlinkComponents } from '../intake/tree.js';
 import { assertSafeRelativePath, validateSpec } from '../spec/validate.js';
 import type { EvaluationSpec } from '../spec/types.js';
-import type { TokenUsage } from '../runtime/provider.js';
+import type { ProviderErrorKind, TokenUsage } from '../runtime/provider.js';
 import { assessClaims } from '../run/decision.js';
 import type { CaseRecord, ClaimAssessment, TerminalReceipt } from '../run/types.js';
 
@@ -36,6 +36,7 @@ interface CallResultEvent {
   elapsedMs: number;
   usage?: TokenUsage;
   message?: string;
+  errorKind?: ProviderErrorKind;
   at: string;
 }
 
@@ -129,7 +130,7 @@ function parseCaseRecord(event: Record<string, unknown>): CaseRecord {
   if (
     typeof event['caseId'] !== 'string' || !['POSITIVE', 'INVALID_SAFETY', 'NEAR_BOUNDARY'].includes(String(event['kind'])) ||
     !Number.isInteger(event['callNumber']) || (event['callNumber'] as number) < 0 ||
-    !['COMPLETED', 'TIMEOUT', 'PROVIDER_ERROR', 'ENVIRONMENT_FAILURE'].includes(String(event['status'])) ||
+    !['COMPLETED', 'TIMEOUT', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID', 'ENVIRONMENT_FAILURE'].includes(String(event['status'])) ||
     !validNonNegativeNumber(event['elapsedMs']) || !Array.isArray(event['filesystemChanges']) || !Array.isArray(event['checks'])
   ) throw integrityError('Append-only case result content is invalid');
   for (const change of event['filesystemChanges']) {
@@ -190,7 +191,7 @@ function parseAccountingEvents(manifest: Manifest, events: Array<Record<string, 
     }
     if (event['event'] === 'CALL_RESULT') {
       const required = ['event', 'callNumber', 'role', 'model', 'status', 'elapsedMs', 'at'];
-      if (!hasExactKeys(event, required, ['caseId', 'usage', 'message'])) throw integrityError('Append-only provider result shape is invalid');
+      if (!hasExactKeys(event, required, ['caseId', 'usage', 'message', 'errorKind'])) throw integrityError('Append-only provider result shape is invalid');
       const attempt = attempts.at(-1);
       const role = event['role'];
       const status = event['status'];
@@ -201,7 +202,10 @@ function parseAccountingEvents(manifest: Manifest, events: Array<Record<string, 
         event['callNumber'] !== attempt.callNumber || role !== attempt.role || caseId !== attempt.caseId ||
         (role === 'candidate' ? model !== 'gpt-5.6-luna' : model !== 'gpt-5.6-terra') ||
         !['completion', 'timeout', 'error'].includes(String(status)) || !validNonNegativeNumber(event['elapsedMs']) || !validIsoTimestamp(event['at']) ||
-        (status === 'completion' ? event['message'] !== undefined : typeof event['message'] !== 'string')
+        (status === 'completion' ? event['message'] !== undefined : typeof event['message'] !== 'string') ||
+        (event['errorKind'] !== undefined && (
+          status !== 'error' || (event['errorKind'] !== 'provider' && event['errorKind'] !== 'instrument')
+        ))
       ) throw integrityError('Append-only provider result does not match its immediately preceding attempt');
       parseUsage(event['usage']);
       results.push(event as unknown as CallResultEvent);

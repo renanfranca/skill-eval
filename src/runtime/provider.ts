@@ -25,10 +25,12 @@ export interface ProviderCompletion {
   promptfooProjection?: Record<string, unknown>;
 }
 
+export type ProviderErrorKind = 'provider' | 'instrument';
+
 export type ProviderResult =
   | ProviderCompletion
   | { status: 'timeout'; elapsedMs: number; message: string }
-  | { status: 'error'; elapsedMs: number; message: string };
+  | { status: 'error'; errorKind: ProviderErrorKind; elapsedMs: number; message: string };
 
 export interface EvaluationProvider {
   readonly kind: 'fake' | 'promptfoo-codex';

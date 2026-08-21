@@ -434,6 +434,10 @@ quatro probes opacos.
 Qualquer probe incorreto, item ausente ou extra, referência inválida, output inválido, timeout ou erro invalida todo o conjunto semântico. Não
 há retry, fallback ou revisão humana automática; o resultado é `NO_DECISION` e a evidência direta permanece preservada.
 
+Falhas locais do adapter Promptfoo — como exceção não-timeout de `evaluate()`, resultado ausente ou resposta estruturalmente inválida — são
+erros do instrumento. Erros efetivamente retornados por `response.error` ou `result.error` são erros do provider; timeout continua separado.
+As três origens consomem a tentativa já iniciada e nunca autorizam retry.
+
 Para ativação, somente telemetria direta de leitura do `SKILL.md` produz evidência positiva. A heurística `skill-used` do Promptfoo é registrada
 como limitação, mas não sustenta sozinha uma claim obrigatória. Ausência do evento de leitura resulta em `NOT_ASSESSED`, inclusive quando há
 expectativa de não ativação.
@@ -495,6 +499,8 @@ Regras importantes:
 - o diretório de saída precisa não existir;
 - a autorização permite até quatro tentativas, mas o judge pode não ser necessário;
 - cada timeout ou erro consome uma tentativa e nunca causa retry;
+- erro local do instrumento encerra como `INSTRUMENT_INVALID / NO_DECISION` e precisa ser corrigido antes de outro run;
+- erro efetivamente retornado pelo provider encerra como `PROVIDER_ERROR / NO_DECISION`;
 - um run interrompido ou concluído nunca é retomado;
 - outra observação exige outro diretório e outra autorização literal.
 
@@ -546,8 +552,9 @@ Somente o texto literal `3` é aceito; `03`, `3.0`, `3e0` e `+3` falham antes da
 6. envia o prompt original a Luna/max, com timeout de 600 segundos e zero retries;
 7. registra presença ou ausência do marcador e remove o workspace no `finally`.
 
-Timeout e erro de provider consomem uma tentativa, mas não impedem os casos seguintes. Falha de integridade, sanitização ou ambiente
-interrompe quando continuar deixaria de ser seguro. O teto é exatamente três tentativas Luna/max; Terra nunca é chamado.
+Timeout e erro de provider consomem uma tentativa, mas não impedem os casos seguintes. Erro local do instrumento é registrado como
+`INSTRUMENT_INVALID` e interrompe as tentativas restantes; falha de integridade, sanitização ou ambiente também interrompe quando continuar
+deixaria de ser seguro. O teto é exatamente três tentativas Luna/max; Terra nunca é chamado.
 
 O diretório indicado por `--out` precisa não existir e deve ficar fora de todo o pacote de avaliação (spec, snapshot e fixtures). Um destino
 igual ou descendente desse pacote é rejeitado como path inseguro antes de criar artefatos ou chamar o provider.
@@ -568,7 +575,7 @@ probes/my-evaluation-activation-001/
 | --- | ---: | --- |
 | `CONFIRMED` | 0 | As três respostas contêm seus marcadores, demonstrando exposição e influência do conteúdo exclusivo do `SKILL.md` temporário. |
 | `NOT_CONFIRMED` | 0 | Ao menos uma resposta concluída não contém seu marcador; isso não prova que a skill não foi usada. |
-| `INCONCLUSIVE` | 3 | Sem ausência observada em resposta aceita, timeout, provider ou ambiente impediram três confirmações. |
+| `INCONCLUSIVE` | 3 | Sem ausência observada em resposta aceita, instrumento, timeout, provider ou ambiente impediram três confirmações. |
 
 `CONFIRMED` não demonstra telemetria de leitura no sistema operacional, leitura de referências, correção, benefício causal ou generalização.
 O probe não modifica nem é agregado automaticamente a `terminal.json`, report, claims ou recomendação do run. Teste A/B está fora do MVP.
@@ -659,7 +666,7 @@ instrumento, ambiente, provider, timeout ou judge inválido; depois ausência ou
 | --- | --- |
 | `COMPLETED` | Todas as fases necessárias concluíram dentro do orçamento. |
 | `CRITICAL_VIOLATION` | Um check direto determinou `REVISE` ou `DO_NOT_PROCEED`. |
-| `INSTRUMENT_INVALID` | Um check não pôde ser aplicado de forma válida. |
+| `INSTRUMENT_INVALID` | Um check não pôde ser aplicado ou a integração local do instrumento falhou. |
 | `EXECUTION_TIMEOUT` | Uma tentativa atingiu timeout. |
 | `PROVIDER_ERROR` | O provider retornou erro. |
 | `ENVIRONMENT_FAILURE` | Workspace, sanitização ou ambiente violou uma precondição. |
@@ -711,13 +718,13 @@ o anterior.
 | `digest does not match` | Skill snapshot ou fixture mudou depois do intake. | Crie uma nova avaliação; não repare o digest manualmente. |
 | `SKILL_EVAL_CODEX_HOME` ausente | `run` ou `probe-activation` não recebeu um Codex home autenticado. | Aponte a variável para um diretório regular com `auth.json`. |
 | Contexto ou path proibido | Há symlink, `AGENTS.md`, `.agents`, `.git`, hardlink ou referência que escapa. | Remova o contexto concorrente da skill ou fixture de origem. |
-| `INSTRUMENT_INVALID` | Um check não pôde ler ou interpretar a evidência. | Corrija o contrato ou a fixture e crie uma nova avaliação. |
+| `INSTRUMENT_INVALID` | Um check não pôde ler a evidência ou a integração local retornou resultado ausente/inválido. | Corrija o contrato, fixture ou adapter antes de criar outra avaliação ou run; preserve o artefato atual. |
 | `JUDGE_INVALID` | Output, refs, schema ou um dos quatro probes falhou. | Preserve o run e, se necessário, crie outro com nova autorização. |
 | `NOT_ASSESSED` em ativação | Não existe telemetria direta suficiente de leitura do `SKILL.md`. | Trate como evidência ausente; a heurística positiva não substitui telemetria. |
 | Custo ChatGPT `UNKNOWN` | Comportamento esperado para autenticação ChatGPT. | Use a estimativa API-equivalent somente como referência condicionada. |
 | Run sem `terminal.json` | Processo interrompido ou confirmação final ausente. | Gere o report, preserve o run e use outro diretório para nova observação. |
 | Probe `NOT_CONFIRMED` | Uma resposta concluída não reproduziu seu marcador. | Preserve o probe; não conclua que a skill deixou de ser usada. |
-| Probe `INCONCLUSIVE` | Timeout, provider, ambiente ou sanitização impediram três confirmações. | Preserve o artefato e use outro diretório somente com nova autorização. |
+| Probe `INCONCLUSIVE` | Timeout, provider, instrumento, ambiente ou sanitização impediram três confirmações. | Preserve o artefato; corrija primeiro qualquer erro do instrumento e use outro diretório somente com nova autorização. |
 
 ## 18. Limites de segurança e de conclusão
 

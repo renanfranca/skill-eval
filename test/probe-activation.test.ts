@@ -11,7 +11,7 @@ import { directAnswers, FIXED_DATE, makePackage } from './helpers.js';
 
 const MARKER_PATTERN = /🔧\[skill-eval:([a-f0-9]{32})\]/g;
 
-type ProbeStep = 'marker' | 'missing' | 'timeout' | 'error' | 'unsafe-symlink';
+type ProbeStep = 'marker' | 'missing' | 'timeout' | 'error' | 'instrument-error' | 'unsafe-symlink';
 
 class WorkspaceProbeProvider implements EvaluationProvider {
   readonly kind = 'fake' as const;
@@ -41,7 +41,12 @@ class WorkspaceProbeProvider implements EvaluationProvider {
 
     const step = this.steps[this.cursor++] ?? 'error';
     if (step === 'timeout') return { status: 'timeout', elapsedMs: 600_000, message: 'deterministic timeout' };
-    if (step === 'error') return { status: 'error', elapsedMs: 2, message: 'deterministic provider error' };
+    if (step === 'error') {
+      return { status: 'error', errorKind: 'provider', elapsedMs: 2, message: 'deterministic provider error' };
+    }
+    if (step === 'instrument-error') {
+      return { status: 'error', errorKind: 'instrument', elapsedMs: 2, message: 'deterministic instrument error' };
+    }
     if (step === 'unsafe-symlink') {
       await symlink('/etc/passwd', path.join(request.workspace, 'unsafe-link'));
       return { status: 'completion', finalOutput: marker, elapsedMs: 3 };
@@ -168,6 +173,35 @@ describe('activation probe', () => {
       terminal: { status: 'INCONCLUSIVE', calls: { attempted: 3, completed: 2, timeout: 1, error: 0, retries: 0 } },
     });
     expect(provider.requests).toHaveLength(3);
+  });
+
+  it('records an instrument error, stops later attempts, cleans the workspace, and returns INCONCLUSIVE', async () => {
+    const fixture = await makePackage();
+    const provider = new WorkspaceProbeProvider(['instrument-error', 'marker', 'marker']);
+    const out = path.join(fixture.root, 'probe-instrument-invalid');
+
+    const result = await runActivationProbe({
+      specPath: fixture.specPath,
+      outDirectory: out,
+      approveProviderCalls: '3',
+      provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 3,
+      terminal: {
+        status: 'INCONCLUSIVE',
+        calls: { attempted: 1, completed: 0, timeout: 0, error: 1, retries: 0 },
+        stoppingRule: expect.stringMatching(/instrument error.*prevented safe continuation/i),
+      },
+    });
+    expect(provider.requests).toHaveLength(1);
+    const events = (await readFile(path.join(out, 'probe-results.jsonl'), 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.find((event) => event['event'] === 'PROBE_RESULT')).toMatchObject({
+      status: 'INSTRUMENT_INVALID', callNumber: 1,
+    });
+    for (const workspace of provider.workspacePaths) await expect(access(workspace)).rejects.toThrow();
   });
 
   it('stops after an unsafe workspace state and classifies the partial evidence as inconclusive', async () => {

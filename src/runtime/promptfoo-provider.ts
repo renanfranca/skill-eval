@@ -13,6 +13,12 @@ interface PromptfooResponse {
   raw?: string;
 }
 
+interface PromptfooResult {
+  success?: unknown;
+  error?: unknown;
+  response?: unknown;
+}
+
 function judgeUsedForbiddenTools(raw: string | undefined): boolean {
   if (raw === undefined) return false;
   try {
@@ -31,6 +37,33 @@ function outputText(output: unknown): string | undefined {
   if (typeof output === 'string') return output;
   if (output !== undefined) return JSON.stringify(output);
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isTimeout(message: string): boolean {
+  return /abort|timeout/i.test(message);
+}
+
+function errorMessage(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.message;
+  try {
+    const serialized = JSON.stringify(value) as string | undefined;
+    return serialized === undefined ? 'Promptfoo returned a provider error' : serialized;
+  } catch {
+    return 'Promptfoo returned a provider error';
+  }
+}
+
+function instrumentError(elapsedMs: number, message: string): ProviderResult {
+  return { status: 'error', errorKind: 'instrument', elapsedMs, message };
+}
+
+function providerError(elapsedMs: number, message: string): ProviderResult {
+  return { status: 'error', errorKind: 'provider', elapsedMs, message };
 }
 
 export class PromptfooCodexProvider implements EvaluationProvider {
@@ -65,7 +98,7 @@ export class PromptfooCodexProvider implements EvaluationProvider {
       };
       const evaluation = await evaluate(
         {
-          prompts: [request.prompt],
+          prompts: [{ raw: request.prompt, label: `skill-eval-${request.role}` }],
           providers: [{ id: 'openai:codex-sdk', config }],
           tests: [{ vars: {} }],
           writeLatestResults: false,
@@ -80,16 +113,26 @@ export class PromptfooCodexProvider implements EvaluationProvider {
           silent: true,
         },
       );
-      const result = evaluation.results[0];
-      const response = result?.response as PromptfooResponse | undefined;
+      const result = evaluation.results[0] as PromptfooResult | undefined;
       const elapsedMs = Math.round(performance.now() - startedAt);
-      if (result === undefined || response === undefined || response.error !== undefined || result.error != null) {
-        const message = response?.error ?? result?.error ?? 'Promptfoo returned no result';
-        return { status: /abort|timeout/i.test(message) ? 'timeout' : 'error', elapsedMs, message };
+      if (result === undefined) return instrumentError(elapsedMs, 'Promptfoo returned no result');
+      if (result.error != null) {
+        const message = errorMessage(result.error);
+        return isTimeout(message)
+          ? { status: 'timeout', elapsedMs, message }
+          : providerError(elapsedMs, message);
+      }
+      if (!isRecord(result.response)) return instrumentError(elapsedMs, 'Promptfoo result has no valid response');
+      const response = result.response as PromptfooResponse;
+      if (response.error !== undefined) {
+        if (typeof response.error !== 'string') return instrumentError(elapsedMs, 'Promptfoo response error is structurally invalid');
+        return isTimeout(response.error)
+          ? { status: 'timeout', elapsedMs, message: response.error }
+          : providerError(elapsedMs, response.error);
       }
       const safeResponse = response;
       const finalOutput = outputText(safeResponse.output);
-      if (finalOutput === undefined) return { status: 'error', elapsedMs, message: 'Promptfoo result has no final output' };
+      if (finalOutput === undefined) return instrumentError(elapsedMs, 'Promptfoo result has no final output');
       const tokenUsage: TokenUsage | undefined = safeResponse.tokenUsage === undefined ? undefined : {
         ...(safeResponse.tokenUsage.prompt === undefined ? {} : { input: safeResponse.tokenUsage.prompt }),
         ...(safeResponse.tokenUsage.cached === undefined ? {} : { cachedInput: safeResponse.tokenUsage.cached }),
@@ -122,7 +165,9 @@ export class PromptfooCodexProvider implements EvaluationProvider {
     } catch (error) {
       const elapsedMs = Math.round(performance.now() - startedAt);
       const message = error instanceof Error ? error.message : String(error);
-      return { status: /abort|timeout/i.test(message) ? 'timeout' : 'error', elapsedMs, message };
+      return isTimeout(message)
+        ? { status: 'timeout', elapsedMs, message }
+        : instrumentError(elapsedMs, message);
     }
   }
 }

@@ -19,7 +19,7 @@ export interface CaseRecord {
   caseId: string;
   kind: CaseKind;
   callNumber: number;
-  status: 'COMPLETED' | 'TIMEOUT' | 'PROVIDER_ERROR' | 'ENVIRONMENT_FAILURE';
+  status: 'COMPLETED' | 'TIMEOUT' | 'PROVIDER_ERROR' | 'INSTRUMENT_INVALID' | 'ENVIRONMENT_FAILURE';
   elapsedMs: number;
   usage?: TokenUsage;
   error?: string;

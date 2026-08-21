@@ -235,7 +235,7 @@ Terra, não altera runs anteriores e não participa de `report` nem da recomenda
 | ---: | --- |
 | 0 | Comando concluído e artefato válido produzido, inclusive avaliações negativas |
 | 2 | Erro de uso, spec ou preflight antes da reserva |
-| 3 | Run ou probe reservado terminou inconclusivo por timeout, provider, ambiente ou judge inválido |
+| 3 | Run ou probe reservado terminou inconclusivo por instrumento, timeout, provider, ambiente ou judge inválido |
 | 4 | Corrupção, overwrite tentado, path inseguro ou violação de integridade |
 
 Uma recomendação `REVISE` ou `DO_NOT_PROCEED` e um probe `NOT_CONFIRMED` são evidência válida e usam exit code 0.
@@ -424,11 +424,21 @@ Fixar dependências no `package-lock.json`. A linha de base aprovada para o iní
 Usar a API Node `evaluate(testSuite, options)` em processo. Não gerar YAML, não invocar o CLI Promptfoo e não usar um `llm-rubric` por caso,
 pois isso criaria chamadas adicionais.
 
+Cada prompt é passado como conteúdo inline por meio de `{ raw, label }`, com labels determinísticos `skill-eval-candidate` e
+`skill-eval-judge`. Uma string de uma linha que contenha um path ou glob nunca é oferecida ao Promptfoo como referência de arquivo.
+
 Providers reais e falsos implementam a mesma porta interna. O fake recebe um script determinístico de completion, timeout ou error e registra
 cada tentativa. `run` injeta o provider real; testes e CI não podem importá-lo por um caminho que o execute automaticamente.
 
 O resultado bruto do Promptfoo é projetado para um formato próprio sanitizado. Objetos internos não são tratados como API estável nem
 persistidos integralmente.
+
+Depois da entrada no adapter, toda chamada conta como tentativa. Exceção não-timeout lançada por `evaluate()`, resultado ausente ou resposta
+estruturalmente inválida é erro de `instrument`; `response.error` ou `result.error` efetivamente retornado é erro de `provider`; timeout
+permanece uma categoria própria. Ambos os tipos de erro incrementam `calls.error` e recebem zero retries. Em run, erro de instrumento do
+candidate ou judge termina `INSTRUMENT_INVALID / NO_DECISION`, com ação sugerida para corrigir o instrumento antes de criar outro run; erro
+do provider termina `PROVIDER_ERROR / NO_DECISION`. No probe, erro de instrumento é registrado como `INSTRUMENT_INVALID`, interrompe casos
+restantes e produz `INCONCLUSIVE`; erro do provider continua permitindo as tentativas seguintes que permaneçam seguras.
 
 ## 8. Pipeline de avaliação
 
@@ -464,8 +474,8 @@ maximum concurrency = 1
 retries = 0
 ```
 
-Após cada trial, persistir a resposta final e aplicar todos os checks diretos antes de decidir continuar. Timeout, provider error ou output
-injulgável encerra o run como inconclusivo. Um check com `failureDecision: DO_NOT_PROCEED` encerra imediatamente e não chama o judge. Um check
+Após cada trial, persistir a resposta final e aplicar todos os checks diretos antes de decidir continuar. Timeout, provider error, erro do
+instrumento ou output injulgável encerra o run como inconclusivo. Um check com `failureDecision: DO_NOT_PROCEED` encerra imediatamente e não chama o judge. Um check
 obrigatório com `failureDecision: REVISE` também pode encerrar com evidência suficiente; checks secundários não autorizam novas chamadas além
 do orçamento.
 
@@ -528,7 +538,7 @@ type JudgeBatch = {
 Exigir exatamente um item por id fornecido, exatamente os critérios esperados, refs existentes, nenhuma chave extra e assessments sem
 credenciais ou raciocínio bruto. A validação mecânica revela os probes somente depois de persistir o output sanitizado.
 
-Todos os quatro probes precisam receber a classificação esperada. JSON inválido, omissão, probe incorreto, timeout ou provider error invalida
+Todos os quatro probes precisam receber a classificação esperada. JSON inválido, omissão, probe incorreto, timeout, provider error ou erro do instrumento invalida
 todo o evidence set semântico. O run termina `NO_DECISION`, preserva evidência direta e não faz retry, fallback ou revisão humana.
 
 ### 8.4 Ausência de retries
@@ -563,13 +573,13 @@ Para cada caso, em ordem `POSITIVE`, `INVALID_SAFETY` e `NEAR_BOUNDARY`:
 
 Cada caso usa marcador diferente. O marcador existe somente no `SKILL.md` temporário e na evidência de auditoria fora do workspace do
 candidato. O snapshot e as fixtures do pacote original permanecem byte-identical. As três chamadas são tentadas mesmo depois de uma resposta
-concluída sem marcador ou de timeout/provider error; só uma falha de integridade, sanitização ou ambiente que torne insegura a continuação
-interrompe casos restantes. Terra nunca é chamado.
+concluída sem marcador ou de timeout/provider error; erro do instrumento ou uma falha de integridade, sanitização ou ambiente que torne
+insegura a continuação interrompe casos restantes. Terra nunca é chamado.
 
 Classificação com precedência fixa:
 
 1. `NOT_CONFIRMED` se ao menos uma chamada concluída não contém o marcador correto;
-2. `INCONCLUSIVE` se não houve marcador ausente em chamada concluída, mas timeout, provider ou ambiente impediram completar os três casos;
+2. `INCONCLUSIVE` se não houve marcador ausente em chamada concluída, mas instrumento, timeout, provider ou ambiente impediram completar os três casos;
 3. `CONFIRMED` se as três chamadas concluíram e cada resposta contém o marcador correto.
 
 `NOT_CONFIRMED` significa somente que o probe não confirmou exposição; não prova que a skill não foi usada. `CONFIRMED` demonstra exposição e
@@ -654,6 +664,9 @@ run/
 O manifest registra versões, digests, condição, configuração de isolamento, ids dos casos e orçamento. Cada case result registra tentativa,
 tempo, usage reportado, erro categorizado, checks e evidence refs. Escritas usam arquivo temporário privado, flush e promoção create-only; nunca
 sobrescrevem componente existente.
+
+Novos eventos `CALL_RESULT` de erro registram `errorKind: "provider" | "instrument"`. O leitor de relatórios aceita eventos históricos sem
+esse campo e mantém `terminal.json` histórico como classificação autoritativa; report não migra nem reclassifica artefatos existentes.
 
 No início do run, timestamps recebem um único anchor UTC do relógio civil. `at` e `completedAt` avançam a partir desse anchor pelo relógio
 monotônico; ordem append-only e `callNumber`, não comparação entre timestamps civis, definem a sequência autoritativa. A cada timestamp, o run
@@ -819,6 +832,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - quatro calls autorizadas nunca permitem cinco;
 - três calls autorizadas pelo probe nunca permitem quatro e nunca chamam Terra;
 - timeout e error debitam uma tentativa e não geram retry;
+- erros do provider e do instrumento permanecem distinguíveis em novos eventos, sem alterar a contabilização conservadora;
 - falha direta interrompe calls restantes conforme seu `failureDecision`;
 - Terra não é chamado quando checks diretos resolvem a decisão;
 - Terra inválido não gera fallback;
@@ -868,7 +882,7 @@ com versões exatas e lockfile. Não criar container de injeção, plugin system
 - manifest, JSONL, outputs, projeções, digests, custo e terminal são suficientes para auditoria e create-only;
 - `CONFIRMED`, `NOT_CONFIRMED` e `INCONCLUSIVE` seguem a precedência prescrita e retornam respectivamente `0`, `0` e `3`;
 - uma resposta concluída sem marcador ou um erro de provider não impede as demais tentativas seguras;
-- falha de integridade, sanitização ou ambiente interrompe continuação insegura;
+- erro do instrumento ou falha de integridade, sanitização ou ambiente interrompe continuação insegura;
 - nenhum probe altera run, report, recomendação ou chama Terra.
 
 ## 16. Critérios de aceitação da implementação
