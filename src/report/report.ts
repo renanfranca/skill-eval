@@ -230,6 +230,27 @@ function usageTotal(records: Array<{ usage?: TokenUsage }>): TokenUsage {
   return result;
 }
 
+function terminalStatusForErrorKind(errorKind: ProviderErrorKind): 'INSTRUMENT_INVALID' | 'PROVIDER_ERROR' {
+  return errorKind === 'instrument' ? 'INSTRUMENT_INVALID' : 'PROVIDER_ERROR';
+}
+
+function validateErrorKindIntegrity(terminal: TerminalReceipt, evidence: AccountingEvidence): void {
+  for (const result of evidence.results) {
+    if (result.status !== 'error' || result.errorKind === undefined) continue;
+    const expectedStatus = terminalStatusForErrorKind(result.errorKind);
+    if (terminal.status !== expectedStatus) {
+      throw integrityError('CALL_RESULT errorKind disagrees with the terminal receipt status');
+    }
+    if (result.role !== 'candidate') continue;
+    const matchingCases = evidence.cases.filter((item) =>
+      item.callNumber === result.callNumber && item.caseId === result.caseId
+    );
+    if (matchingCases.length !== 1 || matchingCases[0]?.status !== expectedStatus) {
+      throw integrityError('Candidate CALL_RESULT errorKind disagrees with its case result status');
+    }
+  }
+}
+
 async function validateCaseRecords(runDirectory: string, manifest: Manifest, cases: CaseRecord[]): Promise<void> {
   const allowedCases = new Map(manifest.spec.cases.map((item) => [item.id, item]));
   if (
@@ -315,6 +336,7 @@ async function validateTerminalReceipt(
     throw integrityError('Terminal receipt claim set disagrees with the frozen spec');
   }
   await validateCaseRecords(runDirectory, manifest, evidence.cases);
+  validateErrorKindIntegrity(terminal, evidence);
   for (const item of terminal.cases) {
     const event = evidence.cases.find((candidate) => candidate.caseId === item.caseId);
     if (event === undefined) throw integrityError(`Append-only result for case ${item.caseId} is missing`);

@@ -36,11 +36,12 @@ export class FakeProvider implements EvaluationProvider {
     if (step === undefined) return { status: 'error', errorKind: 'instrument', elapsedMs: 0, message: 'Fake script exhausted' };
     if (step.type === 'timeout') return { status: 'timeout', elapsedMs: step.elapsedMs ?? request.timeoutMs, message: step.message ?? 'Deterministic timeout' };
     if (step.type === 'error') {
+      const errorKind = step.errorKind ?? 'provider';
       return {
         status: 'error',
-        errorKind: step.errorKind ?? 'provider',
+        errorKind,
         elapsedMs: step.elapsedMs ?? 1,
-        message: step.message ?? 'Deterministic provider error',
+        message: step.message ?? (errorKind === 'instrument' ? 'Deterministic instrument error' : 'Deterministic provider error'),
       };
     }
     if (request.workspace !== undefined) {

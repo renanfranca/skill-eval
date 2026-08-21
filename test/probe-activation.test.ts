@@ -158,6 +158,35 @@ describe('activation probe', () => {
     expect(provider.requests).toHaveLength(3);
   });
 
+  it('preserves NOT_CONFIRMED when a missing marker precedes a terminal instrument error', async () => {
+    const fixture = await makePackage();
+    const provider = new WorkspaceProbeProvider(['missing', 'instrument-error', 'marker']);
+    const out = path.join(fixture.root, 'probe-missing-before-instrument-error');
+
+    const result = await runActivationProbe({
+      specPath: fixture.specPath,
+      outDirectory: out,
+      approveProviderCalls: '3',
+      provider,
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      terminal: {
+        status: 'NOT_CONFIRMED',
+        calls: { attempted: 2, completed: 1, timeout: 0, error: 1, retries: 0 },
+        stoppingRule: expect.stringMatching(/completed response.*marker/i),
+      },
+    });
+    expect(provider.requests).toHaveLength(2);
+    const events = (await readFile(path.join(out, 'probe-results.jsonl'), 'utf8'))
+      .trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.filter((event) => event['event'] === 'PROBE_RESULT')).toEqual([
+      expect.objectContaining({ status: 'COMPLETED', markerPresent: false, callNumber: 1 }),
+      expect.objectContaining({ status: 'INSTRUMENT_INVALID', callNumber: 2 }),
+    ]);
+  });
+
   it('returns INCONCLUSIVE after a timeout when every accepted completion contains its marker, while spending all three safe attempts', async () => {
     const fixture = await makePackage();
     const provider = new WorkspaceProbeProvider(['marker', 'timeout', 'marker']);

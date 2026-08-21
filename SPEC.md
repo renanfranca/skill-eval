@@ -437,8 +437,9 @@ Depois da entrada no adapter, toda chamada conta como tentativa. Exceção não-
 estruturalmente inválida é erro de `instrument`; `response.error` ou `result.error` efetivamente retornado é erro de `provider`; timeout
 permanece uma categoria própria. Ambos os tipos de erro incrementam `calls.error` e recebem zero retries. Em run, erro de instrumento do
 candidate ou judge termina `INSTRUMENT_INVALID / NO_DECISION`, com ação sugerida para corrigir o instrumento antes de criar outro run; erro
-do provider termina `PROVIDER_ERROR / NO_DECISION`. No probe, erro de instrumento é registrado como `INSTRUMENT_INVALID`, interrompe casos
-restantes e produz `INCONCLUSIVE`; erro do provider continua permitindo as tentativas seguintes que permaneçam seguras.
+do provider termina `PROVIDER_ERROR / NO_DECISION`. No probe, erro de instrumento é registrado como `INSTRUMENT_INVALID` e interrompe casos
+restantes; produz `INCONCLUSIVE` somente quando nenhuma resposta concluída anterior já estabeleceu `NOT_CONFIRMED` pela precedência fixa da
+seção 8.5. Erro do provider continua permitindo as tentativas seguintes que permaneçam seguras.
 
 ## 8. Pipeline de avaliação
 

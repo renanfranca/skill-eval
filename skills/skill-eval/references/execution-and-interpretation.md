@@ -164,7 +164,9 @@ never changes a run or its recommendation.
 
 A provider error or timeout does not by itself prevent later safe probe cases.
 An instrument error is recorded as `INSTRUMENT_INVALID`, stops the remaining
-attempts, and makes the probe `INCONCLUSIVE`.
+attempts, and makes the probe `INCONCLUSIVE` only when no earlier completed
+response already established `NOT_CONFIRMED`. The missing-marker stopping rule
+retains precedence in that case.
 
 `CONFIRMED` demonstrates exposure to and influence from the temporary marker,
 not operating-system file-read telemetry, correctness, reference-file reading,

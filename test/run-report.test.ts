@@ -31,6 +31,20 @@ class InvalidUtf8Provider implements EvaluationProvider {
 }
 
 describe('provider-bounded run and deterministic report', () => {
+  it('uses error-origin-specific default messages in the deterministic fake provider', async () => {
+    const request: ProviderRequest = {
+      role: 'candidate', model: 'gpt-5.6-luna', reasoningEffort: 'max',
+      prompt: 'provider-free prompt', timeoutMs: 1_000,
+    };
+
+    await expect(new FakeProvider([{ type: 'error' }]).execute(request)).resolves.toMatchObject({
+      status: 'error', errorKind: 'provider', message: 'Deterministic provider error',
+    });
+    await expect(new FakeProvider([{ type: 'error', errorKind: 'instrument' }]).execute(request)).resolves.toMatchObject({
+      status: 'error', errorKind: 'instrument', message: 'Deterministic instrument error',
+    });
+  });
+
   it('completes direct evidence with three calls, does not call Terra, and reports separated evidence and unknown actual cost', async () => {
     const fixture = await makePackage();
     const provider = new FakeProvider(completions());
@@ -589,6 +603,85 @@ describe('provider-bounded run and deterministic report', () => {
       cases: [expect.objectContaining({ status: 'PROVIDER_ERROR' })],
       calls: { attempted: 1, error: 1, retries: 0 },
     });
+  });
+
+  it.each([
+    ['provider', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID'],
+    ['instrument', 'INSTRUMENT_INVALID', 'PROVIDER_ERROR'],
+  ] as const)('rejects a candidate %s error paired with a contradictory case result', async (errorKind, expectedStatus, tamperedStatus) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-tampered-candidate-${errorKind}-case`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const caseResult = events.find((event) => event['event'] === 'CASE_RESULT');
+    if (caseResult === undefined || caseResult['status'] !== expectedStatus) throw new Error('Expected candidate error case result');
+    caseResult['status'] = tamperedStatus;
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+
+    const terminalPath = path.join(run, 'terminal.json');
+    const terminal = JSON.parse(await readFile(terminalPath, 'utf8')) as { cases: Array<{ status: string }> };
+    if (terminal.cases[0]?.status !== expectedStatus) throw new Error('Expected candidate error terminal case');
+    terminal.cases[0].status = tamperedStatus;
+    await writeFile(terminalPath, canonicalJson(terminal));
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it.each([
+    ['provider', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID'],
+    ['instrument', 'INSTRUMENT_INVALID', 'PROVIDER_ERROR'],
+  ] as const)('rejects a candidate %s error paired with a contradictory terminal status', async (errorKind, expectedStatus, tamperedStatus) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-tampered-candidate-${errorKind}-terminal`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+
+    const terminalPath = path.join(run, 'terminal.json');
+    const terminal = JSON.parse(await readFile(terminalPath, 'utf8')) as { status: string };
+    if (terminal.status !== expectedStatus) throw new Error('Expected candidate error terminal status');
+    terminal.status = tamperedStatus;
+    await writeFile(terminalPath, canonicalJson(terminal));
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it.each([
+    ['provider', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID'],
+    ['instrument', 'INSTRUMENT_INVALID', 'PROVIDER_ERROR'],
+  ] as const)('rejects a judge %s error paired with a contradictory terminal status', async (errorKind, expectedStatus, tamperedStatus) => {
+    const answers = directAnswers();
+    answers.cases[0].semanticCriteria = [{
+      id: 'semantic-meaning', claimId: 'behavior',
+      statement: 'The output conveys the requested meaning.', required: true,
+    }];
+    const fixture = await makePackage(answers);
+    const run = path.join(fixture.root, `run-tampered-judge-${errorKind}-terminal`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([...completions(), { type: 'error', errorKind }]),
+    });
+
+    const terminalPath = path.join(run, 'terminal.json');
+    const terminal = JSON.parse(await readFile(terminalPath, 'utf8')) as { status: string };
+    if (terminal.status !== expectedStatus) throw new Error('Expected judge error terminal status');
+    terminal.status = tamperedStatus;
+    await writeFile(terminalPath, canonicalJson(terminal));
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
   });
 
   it('anchors persisted timestamps to monotonic progress and reports material civil-clock adjustments without changing the decision', async () => {
