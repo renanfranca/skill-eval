@@ -234,19 +234,24 @@ function terminalStatusForErrorKind(errorKind: ProviderErrorKind): 'INSTRUMENT_I
   return errorKind === 'instrument' ? 'INSTRUMENT_INVALID' : 'PROVIDER_ERROR';
 }
 
-function validateErrorKindIntegrity(terminal: TerminalReceipt, evidence: AccountingEvidence): void {
+function validateCandidateErrorKindIntegrity(evidence: AccountingEvidence, hasTerminalReceipt: boolean): void {
+  for (const result of evidence.results) {
+    if (result.role !== 'candidate' || result.status !== 'error' || result.errorKind === undefined) continue;
+    const expectedStatus = terminalStatusForErrorKind(result.errorKind);
+    const matchingCase = evidence.cases.find((item) => item.caseId === result.caseId);
+    if (matchingCase === undefined && !hasTerminalReceipt) continue;
+    if (matchingCase === undefined || matchingCase.callNumber !== result.callNumber || matchingCase.status !== expectedStatus) {
+      throw integrityError('Candidate CALL_RESULT errorKind disagrees with its case result callNumber or status');
+    }
+  }
+}
+
+function validateTerminalErrorKindIntegrity(terminal: TerminalReceipt, evidence: AccountingEvidence): void {
   for (const result of evidence.results) {
     if (result.status !== 'error' || result.errorKind === undefined) continue;
     const expectedStatus = terminalStatusForErrorKind(result.errorKind);
     if (terminal.status !== expectedStatus) {
       throw integrityError('CALL_RESULT errorKind disagrees with the terminal receipt status');
-    }
-    if (result.role !== 'candidate') continue;
-    const matchingCases = evidence.cases.filter((item) =>
-      item.callNumber === result.callNumber && item.caseId === result.caseId
-    );
-    if (matchingCases.length !== 1 || matchingCases[0]?.status !== expectedStatus) {
-      throw integrityError('Candidate CALL_RESULT errorKind disagrees with its case result status');
     }
   }
 }
@@ -336,7 +341,8 @@ async function validateTerminalReceipt(
     throw integrityError('Terminal receipt claim set disagrees with the frozen spec');
   }
   await validateCaseRecords(runDirectory, manifest, evidence.cases);
-  validateErrorKindIntegrity(terminal, evidence);
+  validateCandidateErrorKindIntegrity(evidence, true);
+  validateTerminalErrorKindIntegrity(terminal, evidence);
   for (const item of terminal.cases) {
     const event = evidence.cases.find((candidate) => candidate.caseId === item.caseId);
     if (event === undefined) throw integrityError(`Append-only result for case ${item.caseId} is missing`);
@@ -379,6 +385,7 @@ export async function buildReport(runDirectoryValue: string): Promise<ReportData
     };
   }
   await validateCaseRecords(runDirectory, manifest, evidence.cases);
+  validateCandidateErrorKindIntegrity(evidence, false);
   const completed = evidence.results.filter((event) => event.status === 'completion').length;
   const timeout = evidence.results.filter((event) => event.status === 'timeout').length;
   const providerErrors = evidence.results.filter((event) => event.status === 'error').length;

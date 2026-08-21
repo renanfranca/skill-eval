@@ -606,6 +606,107 @@ describe('provider-bounded run and deterministic report', () => {
   });
 
   it.each([
+    ['provider', 'PROVIDER_ERROR'],
+    ['instrument', 'INSTRUMENT_INVALID'],
+  ] as const)('keeps a coherent interrupted candidate %s error report valid', async (errorKind, expectedStatus) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-interrupted-candidate-${errorKind}`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+    await rm(path.join(run, 'terminal.json'));
+
+    await expect(buildReport(run)).resolves.toMatchObject({
+      terminal: { status: 'INTERRUPTED_UNCONFIRMED' },
+      decision: { recommendation: 'NO_DECISION' },
+      cases: [expect.objectContaining({ status: expectedStatus })],
+      calls: { attempted: 1, completed: 0, timeout: 0, error: 1, retries: 0 },
+    });
+  });
+
+  it.each([
+    ['provider'],
+    ['instrument'],
+  ] as const)('keeps an interrupted candidate %s error without a case result reportable', async (errorKind) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-interrupted-candidate-${errorKind}-without-case`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => event['event'] !== 'CASE_RESULT');
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+    await rm(path.join(run, 'terminal.json'));
+
+    await expect(buildReport(run)).resolves.toMatchObject({
+      terminal: { status: 'INTERRUPTED_UNCONFIRMED' },
+      decision: { recommendation: 'NO_DECISION' },
+      cases: [],
+      calls: { attempted: 1, completed: 0, timeout: 0, error: 1, retries: 0 },
+      lastConfirmedEvidence: 'Last append-only event: CALL_RESULT',
+    });
+  });
+
+  it.each([
+    ['provider'],
+    ['instrument'],
+  ] as const)('rejects an interrupted candidate %s error paired with a contradictory case result call number', async (errorKind) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-interrupted-tampered-candidate-${errorKind}-case-call-number`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const caseResult = events.find((event) => event['event'] === 'CASE_RESULT');
+    if (caseResult === undefined || caseResult['callNumber'] !== 1) throw new Error('Expected first candidate error case result');
+    caseResult['callNumber'] = 2;
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+    await rm(path.join(run, 'terminal.json'));
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it.each([
+    ['provider', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID'],
+    ['instrument', 'INSTRUMENT_INVALID', 'PROVIDER_ERROR'],
+  ] as const)('rejects an interrupted candidate %s error paired with a contradictory case result', async (errorKind, expectedStatus, tamperedStatus) => {
+    const fixture = await makePackage();
+    const run = path.join(fixture.root, `run-interrupted-tampered-candidate-${errorKind}-case`);
+    await runEvaluation({
+      specPath: fixture.specPath,
+      outDirectory: run,
+      approveProviderCalls: '4',
+      provider: new FakeProvider([{ type: 'error', errorKind }]),
+    });
+
+    const eventsPath = path.join(run, 'case-results.jsonl');
+    const events = (await readFile(eventsPath, 'utf8')).trim().split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const caseResult = events.find((event) => event['event'] === 'CASE_RESULT');
+    if (caseResult === undefined || caseResult['status'] !== expectedStatus) throw new Error('Expected candidate error case result');
+    caseResult['status'] = tamperedStatus;
+    await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+    await rm(path.join(run, 'terminal.json'));
+
+    await expect(buildReport(run)).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it.each([
     ['provider', 'PROVIDER_ERROR', 'INSTRUMENT_INVALID'],
     ['instrument', 'INSTRUMENT_INVALID', 'PROVIDER_ERROR'],
   ] as const)('rejects a candidate %s error paired with a contradictory case result', async (errorKind, expectedStatus, tamperedStatus) => {
