@@ -77,6 +77,7 @@ Uma avaliação é defensável quando:
 
 - CLI local em Node.js e TypeScript.
 - Instalação local, explícita e provider-free do companion empacotado em `.agents/skills/skill-eval`.
+- Companion como interface conversacional local, suportada e opcional da versão `0.4.0`, sem substituir a jornada direta da CLI.
 - Skill Codex representada por um diretório com `SKILL.md` e arquivos locais.
 - Questionário guiado e alternativa não interativa equivalente.
 - Especificação JSON canônica, sem YAML.
@@ -160,6 +161,17 @@ renomeia ou apaga deliberadamente uma instalação observada, e uma falha remove
 Instalação nova ou no-op idêntico usa exit code 0 e informa o path instalado, explicando que a descoberta pode exigir uma nova task do Codex
 e não implica ativação na task atual. Erro de uso usa exit code 2. Origem ou destino inseguro, divergência, overwrite tentado ou falha de
 promoção usa exit code 4 e não deixa instalação parcial.
+
+Quando uma task invoca `$skill-eval`, o companion executa seu bootstrap fechado exatamente uma vez como primeira ação operacional, inclusive
+em revisão de desenho ou interpretação que não chamará uma operação da CLI. Antes de o bootstrap concluir, não lê inputs do trabalho ou
+documentação do produto, não emite julgamento e não executa outro comando. O bootstrap aceita somente o checkout corrente validado ou uma
+dependência npm local `skill-eval` validada encontrada a partir do diretório corrente. Ele confina e valida `package.json`, `dist/cli.js`,
+`SPEC.md` e `docs/USAGE.md`, registra a raiz absoluta e usa somente esses arquivos resolvidos durante a task.
+
+Falha de resolução ou validação encerra a atuação do companion sem busca global, consulta a `PATH`, `npx`, instalação, download, rede ou
+fallback para arquivos homônimos do workspace host. Depois do bootstrap, o companion lê a spec e o guia resolvidos e confirma o help geral;
+confirma também o help do subcomando somente quando a task seleciona uma operação. Esse bootstrap não altera decisões do owner,
+autorizações literais, lifecycle create-only nem a separação entre evidência direta, assessment semântico, ativação, custo e recomendação.
 
 ### 4.2 `init`
 

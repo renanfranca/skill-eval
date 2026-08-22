@@ -39,7 +39,7 @@ async function confinedTree(root: string, relative = ''): Promise<string[]> {
   return entries;
 }
 
-describe('experimental skill-eval companion', () => {
+describe('supported optional skill-eval companion', () => {
   it('has the expected frontmatter and a minimal confined tree', async () => {
     const skill = await readFile(path.join(skillRoot, 'SKILL.md'), 'utf8');
     const frontmatterEnd = skill.indexOf('\n---\n', 4);
@@ -83,6 +83,26 @@ describe('experimental skill-eval companion', () => {
     expect(normalized).toContain('Do not invoke `init`; ask the owner to separate the instruments.');
     expect(normalized).toContain('An excluded task without literal invocation may be a `MUST_NOT_ACTIVATE`');
     expect(content).toContain('Never infer authorization for `run` or `probe-activation`.');
+  });
+
+  it('requires the closed bootstrap exactly once as the first action for every task, including design-only review', async () => {
+    const skill = await readFile(path.join(skillRoot, 'SKILL.md'), 'utf8');
+    const execution = await readFile(
+      path.join(skillRoot, 'references', 'execution-and-interpretation.md'),
+      'utf8',
+    );
+    const tree = `${skill}\n${execution}\n${await readFile(path.join(skillRoot, 'references', 'instrument-design.md'), 'utf8')}`;
+
+    expect(skill).toContain('Use this supported, optional local companion');
+    expect(tree).not.toMatch(/\bexperimental\b/iu);
+    expect(skill).toContain('For every task that invokes `$skill-eval`');
+    expect(skill).toContain('first operational action');
+    expect(skill).toContain('Run the bootstrap exactly once');
+    expect(execution).toContain('mandatory for every task that invokes `$skill-eval`');
+    expect(execution).toContain("Run it exactly once as the task's first operational action");
+    expect(execution).toContain('Never run the bootstrap a second time in the same task.');
+    expect(execution).toContain('instrument-design review or interpretation that will not execute a CLI');
+    expect(execution).toContain('A design-only review still requires the bootstrap and general help');
   });
 
   it('contains no forbidden context, installation policy, or evaluation-specific history', async () => {

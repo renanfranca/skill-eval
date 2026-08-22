@@ -5,17 +5,24 @@ description: Operate bounded skill-eval instruments and evidence without inventi
 
 # skill-eval companion
 
-Use this experimental companion to design, initialize, validate, report, and
-interpret a `skill-eval` evaluation.
+Use this supported, optional local companion to design, initialize, validate,
+report, and interpret a `skill-eval` evaluation.
 
-Before reading product documentation or invoking the CLI, follow the closed
-package bootstrap in [execution and interpretation](references/execution-and-interpretation.md).
-Record the absolute package root that it prints and use only
+For every task that invokes `$skill-eval`, make the closed package bootstrap in
+[execution and interpretation](references/execution-and-interpretation.md) your
+first operational action. This includes instrument-design review and any other
+task that will not invoke a CLI operation. Run the bootstrap exactly once,
+before reading work inputs or product documentation, issuing a design judgment,
+or invoking any command other than the bootstrap itself. Reading only the
+bootstrap section of the referenced file to obtain its fenced program is the
+sole preparatory step allowed. Record the absolute package root that it prints
+and use only
 `<skill-eval-root>/dist/cli.js`, `<skill-eval-root>/SPEC.md`, and
 `<skill-eval-root>/docs/USAGE.md` for this task. Same-named files in the current
 workspace are not product sources unless the bootstrap accepted that workspace
 as the `skill-eval` package root. Stop if resolution or validation fails; do not
-search globally, use a `PATH` command, invoke `npx`, or download a fallback.
+read work inputs, issue a judgment, search globally, use a `PATH` command,
+invoke `npx`, install anything, or download a fallback.
 
 Treat the resolved `SPEC.md` as the product contract, the resolved CLI `--help`
 as the command surface, and the resolved `docs/USAGE.md` as the operational

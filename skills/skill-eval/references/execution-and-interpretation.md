@@ -2,11 +2,16 @@
 
 ## Closed package bootstrap
 
-Run the following bootstrap exactly once from the task's current working
-directory before reading product documentation or invoking any command. Pass
-the fenced block unchanged to `node --input-type=module --eval`; do not save it
-as a host-workspace file. It prints exactly one validated absolute package root
-on success.
+This bootstrap is mandatory for every task that invokes `$skill-eval`, including
+instrument-design review or interpretation that will not execute a CLI
+operation. Run it exactly once as the task's first operational action, from the
+current working directory. Before it succeeds, do not read work inputs or
+product documentation, issue any judgment, or run any other command. Reading
+only this section to obtain the fenced program is the sole preparatory step.
+
+Pass the fenced block unchanged to `node --input-type=module --eval`; do not
+save it as a host-workspace file. It prints exactly one validated absolute
+package root on success. Never run the bootstrap a second time in the same task.
 
 ```js skill-eval-root-bootstrap
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
@@ -90,12 +95,14 @@ process.stdout.write(`${packageRoot}\n`);
 
 Record stdout as `<skill-eval-root>`. Read only
 `<skill-eval-root>/SPEC.md` and `<skill-eval-root>/docs/USAGE.md`, then confirm
-the current surface with
-`node "<skill-eval-root>/dist/cli.js" --help` and the selected subcommand's
-`--help` before acting. The resolved `SPEC.md` remains authoritative over this
-summary. Never substitute same-named files from the host workspace. If the
-bootstrap fails, stop without global lookup, `PATH` search, `npx`, install, or
-network fallback.
+the current surface with `node "<skill-eval-root>/dist/cli.js" --help`. When the
+task selects a CLI operation, also inspect that subcommand's `--help` before
+invoking it. A design-only review still requires the bootstrap and general help,
+but has no selected subcommand help. The resolved `SPEC.md` remains
+authoritative over this summary. Never substitute same-named files from the
+host workspace. If the bootstrap fails, stop without reading work inputs,
+issuing a judgment, global lookup, `PATH` search, `npx`, install, or network
+fallback.
 
 ## Commands
 

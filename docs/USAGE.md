@@ -83,10 +83,11 @@ npm run build
 node "$PWD/dist/cli.js" --help
 ```
 
-### 2.4 Companion conversacional local e opcional
+### 2.4 Companion conversacional local, suportado e opcional
 
-O companion ajuda uma conversa Codex a revisar o desenho do instrumento e operar o fluxo documentado. A CLI continua responsável por criar,
-validar, executar e reportar os artefatos; instalar o companion não executa esses comandos nem concede autorização de provider.
+O companion é uma interface suportada da versão local `0.4.0` que ajuda uma conversa Codex a revisar o desenho do instrumento e operar o
+fluxo documentado. Seu uso permanece opcional. A CLI continua responsável por criar, validar, executar e reportar os artefatos; instalar o
+companion não executa esses comandos nem concede autorização de provider.
 
 No projeto em que o companion deve ficar disponível para descoberta futura, execute explicitamente:
 
@@ -108,6 +109,17 @@ deliberadamente qualquer instalação observada.
 
 Talvez seja necessário iniciar uma nova task do Codex para atualizar a descoberta. A instalação não promete leitura ou ativação na task
 corrente. Quem não quiser o companion pode usar todos os comandos da CLI diretamente; esse caminho permanece completo e suportado.
+
+Quando uma task invoca `$skill-eval`, sua primeira ação operacional é executar exatamente uma vez o bootstrap fechado documentado no próprio
+companion. Isso vale também para revisão de desenho ou interpretação sem operação da CLI. Antes do sucesso do bootstrap, o companion não lê
+inputs do trabalho ou documentação do produto, não emite julgamento e não executa outro comando. O único passo preparatório é obter o bloco
+do bootstrap na referência empacotada.
+
+O bootstrap aceita somente o checkout corrente quando ele próprio é um package root `skill-eval` válido, ou uma dependência npm local
+validada a partir do diretório corrente. Ele confina `package.json`, `dist/cli.js`, `SPEC.md` e `docs/USAGE.md` na raiz real resolvida. Em
+falha, o companion para sem busca global, `PATH`, `npx`, instalação, download, rede ou fallback para arquivos homônimos do workspace host.
+Depois do sucesso, registra a raiz absoluta, lê somente a spec e o guia resolvidos e executa o help geral da CLI resolvida. O help de um
+subcomando é exigido apenas quando a task seleciona aquela operação.
 
 ## 3. Jornada completa
 

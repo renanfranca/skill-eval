@@ -70,10 +70,11 @@ Cada comando e subcomando possui `--help`. `install`, `init`, `check` e `report`
 `probe-activation`, somente `3`. Ambos exigem um diretório inexistente e não reutilizam autorização nem artefato anterior. O output do probe
 também precisa ficar fora do pacote de avaliação congelado.
 
-### Companion conversacional opcional
+### Companion conversacional suportado e opcional
 
-O pacote inclui um companion conversacional que ajuda a revisar a coerência do instrumento e a operar a jornada documentada. Ele não
-substitui os comandos da CLI, não inventa decisões do owner e não autoriza providers. Para disponibilizá-lo explicitamente no projeto atual:
+O pacote inclui um companion conversacional suportado como interface local e opcional para revisar a coerência do instrumento e operar a
+jornada documentada. Ele não substitui os comandos da CLI, não inventa decisões do owner e não autoriza providers. Para disponibilizá-lo
+explicitamente no projeto atual:
 
 ```text
 npx --no-install skill-eval install --skills
@@ -83,6 +84,12 @@ O único destino é `.agents/skills/skill-eval` relativo ao diretório corrente.
 uma árvore já idêntica é no-op; qualquer diferença, arquivo extra ou tipo inseguro é recusado sem alteração. Não existe path configurável,
 `--force`, instalação global, overwrite, `postinstall`, provider ou ativação automática. A descoberta do companion pode exigir uma nova task
 do Codex, e a instalação não comprova ativação na task atual.
+
+Em toda task que invoque `$skill-eval`, inclusive uma revisão de desenho que não executará a CLI, o companion exige como primeira ação
+operacional um bootstrap fechado do package root. O bootstrap roda exatamente uma vez, antes de ler inputs do trabalho ou documentação do
+produto, emitir julgamento ou executar outro comando. Ele aceita somente este checkout validado ou uma dependência npm local validada; se a
+resolução falhar, a task para sem busca global, `PATH`, `npx`, instalação, download ou fallback para arquivos homônimos do workspace host.
+Depois do bootstrap, somente `SPEC.md`, `docs/USAGE.md` e `dist/cli.js` da raiz validada governam a operação.
 
 A cópia nova usa staging privado no mesmo filesystem, valida a árvore completa, rechecando o destino imediatamente antes de promovê-la por
 `rename`. Se um destino vazio ou não vazio surgir antes dessa rechecagem, ele é preservado e somente o staging é removido. Com o workspace e
